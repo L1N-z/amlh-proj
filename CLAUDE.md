@@ -11,8 +11,16 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
 1. **`answer` is never an inference-time input.** The only input at prediction time is
    `question`. Training-side answers MAY be indexed as class evidence; test-side answers must
    never be read by any code path.
-2. **The test set is evaluated once**, in `05_results.ipynb`, after every hyperparameter is
-   frozen in `config.py`. Never tune against test. Never add a test-set cell to notebooks 01–04.
+2. **The test set informs no selection decision.** Model, hyperparameter, preprocessing,
+   index-variant and prompt choices are made on validation only. Test *predictions* are
+   generated once, in `05_results.ipynb`, after every hyperparameter is frozen in `config.py`.
+
+   **One declared exception:** `01_eda.ipynb` uses test questions and labels for distributional
+   diagnostics only — sibling-homogeneity measurement, near-duplication audit, and the novelty
+   target for calibration. These characterise the validation–test relationship and select
+   nothing. Any new use of test data outside `05_results.ipynb` requires my approval first.
+
+   Never add a test-set *evaluation* cell to notebooks 02–04.
 3. **Never state a number that was not printed by code you just ran.** No estimated, recalled or
    plausible metrics — in code comments, in notebook markdown, or in chat.
 4. **`SEED = 42`** from `config.py`. Re-seed before every stochastic stage.

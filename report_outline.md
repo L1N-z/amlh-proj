@@ -114,9 +114,12 @@ Three things must be **argued**, not stated:
   the test set — and report a novelty-calibrated estimate as a secondary check."*
 - **Note the noise floor:** 200 validation items give SE ≈ 3.5pp, so grid differences below ~7pp
   are not meaningful. Say this once; it protects every claim that follows.
-- **Test set used exactly once**, after hyperparameters were frozen.
+- **Test set used exactly once**, after hyperparameters were frozen. Note: Test labels were used for one distributional diagnostic characterising the validation–test relationship; no model, hyperparameter, preprocessing setting or index variant was selected using test data.
 - Hyperparameter table; prompt table (verbatim); compute (Colab T4, wall-clock, peak memory);
   reproducibility (seed 42, pinned versions, persisted artefacts).
+- Truncation- robust split – already in section 2.5. Diverges from course so needs justification.
+Run the unstratified train_test_split too so that both can be reported in the ablation table — one extra row. It demonstrates knowledge of the standard module tool, shows the choice was tested rather than assumed, and if the two produce similar hyperparameter rankings that's evidence the selection is robust to split design.
+
 
 ---
 
