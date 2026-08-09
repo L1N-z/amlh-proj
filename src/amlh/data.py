@@ -136,6 +136,13 @@ def make_validation_split(train: pd.DataFrame, seed: int = SEED) -> SplitResult:
     return SplitResult(fit=fit, val=val, val_classes=sorted(val_classes))
 
 
+def make_random_split(train: pd.DataFrame, seed: int = SEED) -> SplitResult:
+    """Unstratified hold-out matching test size only — ablation baseline showing
+    what stratification buys over the NLP1/NLP3-style naive split."""
+    fit, val = train_test_split(train, test_size=VAL_SIZE, random_state=seed)
+    return SplitResult(fit=fit, val=val, val_classes=sorted(val.disease.unique()))
+
+
 def save_splits(fit: pd.DataFrame, val: pd.DataFrame, audit: dict) -> None:
     """Write splits + audit to artefacts/. split_fit.csv retains `answer` (needed for
     Arm 1 index variants QLA/QLAD) — do not strip it on save."""
@@ -161,5 +168,8 @@ if __name__ == "__main__":
     )
 
     # Unstratified split for the ablation table, reported alongside the stratified one.
-    _, unstrat_val = train_test_split(train, test_size=VAL_SIZE, random_state=SEED)
-    print(f"unstratified val: {len(unstrat_val)} rows, {unstrat_val.disease.nunique()} classes")
+    random_split = make_random_split(train)
+    print(
+        f"unstratified val: {len(random_split.val)} rows, "
+        f"{len(random_split.val_classes)} classes"
+    )
