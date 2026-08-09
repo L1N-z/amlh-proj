@@ -4,7 +4,7 @@ import pytest
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from amlh.arm1_tfidf import knn_rank
-from amlh.features import build_index, build_vectoriser, lemmatise, load_class_doc
+from amlh.features import build_index, build_vectoriser, doc_coverage, lemmatise, load_class_doc
 
 
 def test_build_vectoriser_passes_through_kwargs():
@@ -87,6 +87,20 @@ def test_load_class_doc_strips_boilerplate():
 
 def test_load_class_doc_missing_returns_empty():
     assert load_class_doc("this_disease_does_not_exist") == ""
+
+
+def test_doc_coverage_full_train_universe(train):
+    coverage = doc_coverage(train.disease.unique())
+    assert coverage["n_total"] == train.disease.nunique()
+    assert coverage["n_found"] == coverage["n_total"]
+    assert coverage["missing"] == []
+
+
+def test_doc_coverage_reports_missing():
+    coverage = doc_coverage(["Bronchitis", "this_disease_does_not_exist"])
+    assert coverage["n_total"] == 2
+    assert coverage["n_found"] == 1
+    assert coverage["missing"] == ["this_disease_does_not_exist"]
 
 
 def _spacy_ready() -> bool:

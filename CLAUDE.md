@@ -63,7 +63,7 @@ Target environment: free Google Colab T4. Keep everything within 16 GB GPU memor
 Validation is a single stratified hold-out of 200 items / 102 classes. It **over-estimates test
 accuracy by roughly 35pp** (~0.77 vs ~0.40 for Arm 1). Cause: the ~10 questions per disease were
 generated in one pass, so a held-out question is a phrasing sibling of those left in training
-(cosine 0.57) while a test question is not (0.36). Cross-validation would not fix this — siblings
+(cosine 0.572) while a test question is not (0.391). Cross-validation would not fix this — siblings
 remain inside every fold.
 
 Validation has 200 items, so SE ≈ 3.5pp. **Differences below ~7pp are noise.** Do not describe a

@@ -53,6 +53,18 @@ def load_class_doc(disease: str) -> str:
     return _strip_boilerplate(path.read_text(encoding="utf-8-sig"))
 
 
+def doc_coverage(diseases) -> dict:
+    """NHS class-document coverage over `diseases` (case-insensitive filename match)."""
+    idx = _filename_index()
+    diseases = list(diseases)
+    missing = sorted(d for d in diseases if d.lower() not in idx)
+    return {
+        "n_total": len(diseases),
+        "n_found": len(diseases) - len(missing),
+        "missing": missing,
+    }
+
+
 @lru_cache(maxsize=1)
 def _nlp():
     import spacy

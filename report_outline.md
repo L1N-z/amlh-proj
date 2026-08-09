@@ -17,8 +17,8 @@ Write to 2,400 and trim.
 | Ambiguous questions | 85 identical strings map to >1 disease | §3.3, §4.3 |
 | Train–test duplication | 0.5% above 0.9 cosine; median max 0.485 | §3.1 — validity check passed |
 | Question length | mean 8.4 words, 99th pct 18 | §2.2 — justifies `max_length=48` |
-| Sibling homogeneity | train→sibling 0.57 vs test→own-class 0.36 | §3.1, §4.2 — **the centrepiece** |
-| Wrong class closer | 62.5% of test questions | §3.1 |
+| Sibling homogeneity | train→sibling 0.572 vs test→own-class 0.391 (test→other-class 0.510) | §3.1, §4.2 — **the centrepiece** |
+| Wrong class closer | 59.5% of test questions | §3.1 |
 | Validation→test gap | ~0.77 vs ~0.40 (Arm 1) | §2.5, §4.2 |
 
 ---
@@ -107,7 +107,7 @@ Three things must be **argued**, not stated:
   decision load. Follows the Week 9 practical.
 - **State its limitation and why you chose it anyway.** Roughly this: *"Because the ~10 questions
   per disease were generated in one pass, a held-out validation question is a sibling of those
-  remaining in training (cosine 0.57) whereas a test question is not (0.36). Hold-out validation
+  remaining in training (cosine 0.572) whereas a test question is not (0.391). Hold-out validation
   therefore over-estimates test accuracy. Cross-validation would not remedy this, since siblings
   remain within every training fold; the bias follows from data generation, not from slicing. We
   retain the hold-out for hyperparameter selection — the ranking of configurations transferred to
