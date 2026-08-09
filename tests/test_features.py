@@ -3,8 +3,17 @@ from unittest.mock import patch
 import pytest
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from collections import Counter
+
 from amlh.arm1_tfidf import knn_rank
-from amlh.features import build_index, build_vectoriser, doc_coverage, lemmatise, load_class_doc
+from amlh.features import (
+    build_index,
+    build_index_additive,
+    build_vectoriser,
+    doc_coverage,
+    lemmatise,
+    load_class_doc,
+)
 
 
 def test_build_vectoriser_passes_through_kwargs():
@@ -62,6 +71,43 @@ def test_build_index_invalid_variant_raises(split):
 def test_build_index_labels_subset_of_disease_universe(train, split):
     _, labels = build_index(split.fit, "QLAD")
     assert set(labels) <= set(train.disease.unique())
+
+
+def test_build_index_additive_row_counts_class_level_not_repeated(split):
+    counts = split.fit.disease.value_counts()
+    diseases = counts.index[:3].tolist()
+    subset = split.fit[split.fit.disease.isin(diseases)].reset_index(drop=True)
+
+    texts, labels = build_index_additive(subset, "QLAD")
+
+    assert len(texts) == len(labels) == len(subset) + len(diseases)
+
+    label_counts = Counter(labels)
+    for disease in diseases:
+        expected = int((subset.disease == disease).sum()) + 1  # per-row Q/A + one L/D row
+        assert label_counts[disease] == expected
+
+
+def test_build_index_additive_per_row_only_component_has_no_extra_rows(split):
+    subset = split.fit.head(20)
+    texts, labels = build_index_additive(subset, "Q")
+    assert len(texts) == len(labels) == len(subset)
+
+
+def test_build_index_additive_class_level_only_component_is_one_row_per_class(split):
+    subset = split.fit.head(20)
+    texts, labels = build_index_additive(subset, "L")
+    assert len(texts) == len(labels) == subset.disease.nunique()
+
+
+def test_build_index_additive_rejects_test_frame_when_variant_needs_answer(test):
+    with pytest.raises(KeyError):
+        build_index_additive(test, "QA")
+
+
+def test_build_index_additive_invalid_variant_raises(split):
+    with pytest.raises(ValueError):
+        build_index_additive(split.fit, "QZ")
 
 
 @pytest.mark.parametrize("disease", ["Bronchitis", "Multiple_sclerosis", "abscess"])

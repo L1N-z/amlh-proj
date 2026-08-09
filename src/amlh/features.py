@@ -116,3 +116,47 @@ def build_index(fit_df: pd.DataFrame, variant: str) -> tuple[list[str], list[str
         texts.append(" ".join(parts))
         labels.append(c)
     return texts, labels
+
+
+def build_index_additive(fit_df: pd.DataFrame, variant: str) -> tuple[list[str], list[str]]:
+    """One row per training example for the per-example components (Q, A),
+    plus exactly one extra row per class for the class-level components (L, D).
+
+    L and D do not scale with class size (a class doc is ~4000 chars vs an
+    ~8-word question), so repeating them per example would dominate the index
+    and make this scheme incomparable to `build_index`'s class-blob. Same
+    canonical component order and leak-guard as `build_index`.
+    """
+    bad = set(variant) - set(_COMPONENTS)
+    if bad:
+        raise ValueError(f"variant must be subset of {_COMPONENTS}, got unknown chars {bad}")
+
+    texts: list[str] = []
+    labels: list[str] = []
+
+    if "Q" in variant or "A" in variant:
+        questions = fit_df["question"] if "Q" in variant else None
+        answers = fit_df["answer"] if "A" in variant else None  # KeyError if missing, by design
+        diseases = fit_df["disease"]
+        for i in range(len(fit_df)):
+            parts = []
+            if questions is not None:
+                parts.append(questions.iloc[i])
+            if answers is not None:
+                parts.append(answers.iloc[i])
+            texts.append(" ".join(parts))
+            labels.append(diseases.iloc[i])
+
+    if "L" in variant or "D" in variant:
+        for c in fit_df["disease"].unique():
+            parts = []
+            if "L" in variant:
+                parts.append(c.replace("_", " "))
+            if "D" in variant:
+                doc = load_class_doc(c)
+                if doc:
+                    parts.append(doc)
+            texts.append(" ".join(parts))
+            labels.append(c)
+
+    return texts, labels

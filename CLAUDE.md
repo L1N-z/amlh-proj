@@ -27,6 +27,7 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
 5. **Fit vectorisers and models on training data only.** Never `fit` or `fit_transform` on
    validation or test text.
 6. Notebooks exchange state through `artefacts/`, never through in-memory variables.
+7. Keep num_workers=0 in the BERT DataLoaders. Windows spawns rather than forks, so num_workers>0 inside a notebook will hang or error.
 
 ## Architecture
 

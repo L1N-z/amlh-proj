@@ -130,6 +130,12 @@ Lead with three findings: near-uniform support, label-family granularity, and th
 **near-duplication check passing**. Then the novelty-distribution figure and the
 sibling-homogeneity table — this is the report's strongest original content.
 
+> State the fitting corpus for reproducibility: the diagnostic TF-IDF vectorisers behind the
+> near-duplication and sibling-homogeneity figures (`data.run_integrity_audit`,
+> `eda.sibling_homogeneity`) are fit on **training questions only**. Fitting the same vectoriser
+> including test-side text instead shifts the measured cosine similarities by +0.035 (own-class)
+> and +0.057 (other-class) — an unstated fitting corpus makes these figures unreproducible.
+
 ### 3.2 Performance Comparison (~300 w)
 
 | System | Accuracy | 95% CI | Macro-F1 | s/query |

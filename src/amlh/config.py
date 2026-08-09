@@ -33,14 +33,20 @@ IndexVariant = Literal["Q", "QL", "QLA", "QLAD"]
 @dataclass(frozen=True)
 class Hyperparameters:
     # Arm 1 — TF-IDF / k-NN (vectoriser + index + retrieval)
-    ngram_range: tuple[int, int] | None = None
-    min_df: int | None = None
-    max_df: float | None = None
-    sublinear_tf: bool | None = None
+    # Frozen from notebooks/02_arm1.ipynb (validation-only, stratified 200/102-class hold-out).
+    # Selection used a within-1-SE-prefer-simplest rule throughout, not raw argmax, given
+    # SE ≈ 3.5pp at n=200. Q, class_blob, k=1, unigrams, no stop words, no lemmatisation was
+    # simplest within 1 SE of the grid argmax (ngram_range=(1,2), stop_words="english",
+    # accuracy=0.835); the variant-specific vectoriser re-check confirmed the same config.
+    ngram_range: tuple[int, int] | None = (1, 1)
+    min_df: int | None = 1
+    max_df: float | None = 1.0
+    sublinear_tf: bool | None = False
     stop_words: str | list[str] | None = None  # ablation outcome, e.g. None or "english"
-    lemmatise: bool | None = None  # ablation outcome (spaCy en_core_web_sm)
-    index_variant: IndexVariant | None = None  # Q / QL / QLA / QLAD — biggest Arm 1 lever
-    k_neighbors: int | None = None
+    lemmatise: bool | None = False  # ablation outcome (spaCy en_core_web_sm)
+    index_variant: IndexVariant | None = "Q"  # Q / QL / QLA / QLAD — biggest Arm 1 lever
+    index_scheme: Literal["class_blob", "additive_per_row"] | None = "class_blob"
+    k_neighbors: int | None = 1
     # Arm 2 — BERT
     bert_model_name: str | None = None
     max_length: int | None = None
