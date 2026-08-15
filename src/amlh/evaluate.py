@@ -31,6 +31,21 @@ def score_ranked(ranked: list[list[str]], gold: list[str]) -> dict[str, float]:
     return {"accuracy": accuracy, "acc_at_5": acc_at_5, "macro_f1": macro_f1, "mrr": mrr}
 
 
+def pairwise_top1_disagreement(top1_by_key: dict[str, list[str]]) -> pd.DataFrame:
+    """Symmetric matrix (keys x keys) of how many items differ in their top-1
+    prediction between each pair of keys (e.g. index variants run over the
+    same query set). Diagonal is 0. All lists must be the same length and in
+    query-aligned order."""
+    keys = list(top1_by_key)
+    matrix = pd.DataFrame(0, index=keys, columns=keys)
+    for i, a in enumerate(keys):
+        for b in keys[i + 1 :]:
+            changed = sum(x != y for x, y in zip(top1_by_key[a], top1_by_key[b]))
+            matrix.loc[a, b] = changed
+            matrix.loc[b, a] = changed
+    return matrix
+
+
 def accuracy_coverage_curve(
     ranked: list[list[str]],
     gold: list[str],

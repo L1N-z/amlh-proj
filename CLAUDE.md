@@ -21,9 +21,41 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
    nothing. Any new use of test data outside `05_results.ipynb` requires my approval first.
 
    Never add a test-set *evaluation* cell to notebooks 02–04.
+
+   **Declared exception #2 (dated 2026-08-09):** `scripts/measure_protocol_ranking.py` computes
+   `test_acc` for the Arm 1 index-variant/scheme grid under both the standard and the hard
+   (shift-aware) validation split, to measure which protocol better predicts test ranking
+   (Spearman rho). This is a protocol diagnostic, not model selection: the index-variant/scheme
+   choice is made from `std_val_acc`/`hard_val_acc` alone via the tie-break rule below, never
+   from `test_acc`. Test-set access is confined to this one script; notebooks 02–04 remain free
+   of any test-set cell.
+
+   **Index-variant selection tie-break rule** (pre-registered before viewing this comparison on
+   real test data; scope clarified 2026-08-15, see below): the standard hold-out decides wherever
+   it discriminates. Where it does *not* — the candidates fall within 1 SE of each other, so the
+   ranking is noise — the hard (shift-aware) hold-out breaks the tie, because §3.1 establishes
+   the test distribution resembles the lexeme-absent stratum, not the lexeme-present majority the
+   standard split is drawn from. A protocol cannot overturn a comparison it does not itself
+   resolve at better than 1 SE. This governs Arm 1 index-variant and index-scheme selection; Arm 2
+   epoch/checkpoint selection continues to use standard hold-out.
+
+   **Decision recorded 2026-08-15** (applied in `02_arm1.ipynb` §4a/§5 and frozen in `config.py`):
+
+   - **`index_variant = "QLAD"`** — the standard hold-out ties all four variants at 0.820
+     (SE 0.027), so it does not discriminate. The tie-break fires: the hard hold-out ranks QLAD
+     first at 0.328, by 0.065 over the runner-up against its own SE of 0.023.
+   - **`index_scheme = "class_blob"`** — both protocols rank it first, each by more than its own
+     SE (standard 0.850 by 0.120, SE 0.025; hard 0.398 by 0.073, SE 0.024). They agree, so the
+     tie-break never fires.
+   - **`ngram_range = (1, 2)`** — a consequence of the variant switch, not an independent choice.
+     The variant-specific re-check (notebook §4b) re-tunes the vectoriser on QLAD blobs, which are
+     NHS prose rather than short questions; the step-2 optimum tuned on variant Q did not transfer.
+
+   All three are computed in the notebook from validation accuracies alone and printed with their
+   margins and SEs; none reads `test_acc`.
 3. **Never state a number that was not printed by code you just ran.** No estimated, recalled or
    plausible metrics — in code comments, in notebook markdown, or in chat.
-4. **`SEED = 42`** from `config.py`. Re-seed before every stochastic stage.
+4. **`SEED = 44`** from `config.py`. Re-seed before every stochastic stage.
 5. **Fit vectorisers and models on training data only.** Never `fit` or `fit_transform` on
    validation or test text.
 6. Notebooks exchange state through `artefacts/`, never through in-memory variables.

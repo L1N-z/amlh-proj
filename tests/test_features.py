@@ -5,6 +5,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from collections import Counter
 
+from amlh import features
 from amlh.arm1_tfidf import knn_rank
 from amlh.features import (
     build_index,
@@ -13,6 +14,7 @@ from amlh.features import (
     doc_coverage,
     lemmatise,
     load_class_doc,
+    term_class_coverage,
 )
 
 
@@ -140,6 +142,21 @@ def test_doc_coverage_full_train_universe(train):
     assert coverage["n_total"] == train.disease.nunique()
     assert coverage["n_found"] == coverage["n_total"]
     assert coverage["missing"] == []
+
+
+def test_term_class_coverage_counts_across_classes(monkeypatch):
+    docs = {
+        "d1": "alpha beta common",
+        "d2": "gamma beta common",
+        "d3": "delta common",
+    }
+    monkeypatch.setattr(features, "load_class_doc", lambda d: docs[d])
+    coverage = term_class_coverage(list(docs))
+    assert coverage["alpha"] == 1
+    assert coverage["gamma"] == 1
+    assert coverage["beta"] == 2
+    assert coverage["common"] == 3
+    assert "zzz_not_present" not in coverage
 
 
 def test_doc_coverage_reports_missing():

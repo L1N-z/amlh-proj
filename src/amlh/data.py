@@ -6,6 +6,7 @@ never an inference-time input (see CLAUDE.md hard rule #1).
 """
 
 import json
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -134,6 +135,84 @@ def make_validation_split(train: pd.DataFrame, seed: int = SEED) -> SplitResult:
     assert set(val.index) & set(fit.index) == set()
 
     return SplitResult(fit=fit, val=val, val_classes=sorted(val_classes))
+
+
+def _content_words(text: str) -> set[str]:
+    """Lowercased words with length > 2 — used to test whether a question
+    contains a substantive word from its own disease label."""
+    return {w.lower() for w in re.findall(r"\w+", text) if len(w) > 2}
+
+
+def make_hard_validation_split(train: pd.DataFrame, seed: int = SEED, n: int = 400) -> SplitResult:
+    """Class-aware hold-out drawn only from "hard" rows: questions that share
+    no substantive word with their own disease label. Standard hold-out
+    validation questions are lexical siblings of training questions in a way
+    test questions are not (see eda.sibling_homogeneity); this split is a
+    shift-aware alternative, restricted to the pool of rows that don't give
+    the class away lexically.
+
+    Reuses `make_validation_split`'s divmod-based quota mechanism, but every
+    class with >=1 eligible pool row participates (there's no fixed class
+    count to subsample down to, unlike VAL_N_CLASSES).
+    """
+    rng = np.random.default_rng(seed)
+
+    label_words = {c: _content_words(c.replace("_", " ")) for c in train["disease"].unique()}
+    hard_mask = train.apply(
+        lambda row: _content_words(row["question"]).isdisjoint(label_words[row["disease"]]), axis=1
+    )
+    pool = train[hard_mask]
+
+    pool_counts = pool.disease.value_counts()
+    full_counts = train.disease.value_counts()
+
+    candidate_classes = sorted(c for c in pool_counts.index if full_counts[c] - MIN_FIT_SUPPORT >= 1)
+    n_classes = len(candidate_classes)
+    if n_classes == 0:
+        raise ValueError("no classes have an eligible (label-word-free) pool member")
+
+    base, extra = divmod(n, n_classes)
+
+    usable = [
+        c for c in candidate_classes
+        if pool_counts[c] >= base and full_counts[c] - base >= MIN_FIT_SUPPORT
+    ]
+    if len(usable) < n_classes:
+        raise ValueError(
+            f"only {len(usable)}/{n_classes} candidate classes can supply {base} item(s) "
+            f"while retaining {MIN_FIT_SUPPORT}"
+        )
+
+    quota = {c: base for c in candidate_classes}
+    bonus_pool = [
+        c for c in candidate_classes
+        if pool_counts[c] >= base + 1 and full_counts[c] - (base + 1) >= MIN_FIT_SUPPORT
+    ]
+    if len(bonus_pool) < extra:
+        raise ValueError(f"only {len(bonus_pool)} classes can supply an extra item; {extra} needed")
+    for c in rng.choice(bonus_pool, size=extra, replace=False):
+        quota[c] += 1
+
+    val_idx = []
+    for c in candidate_classes:
+        if quota[c] == 0:
+            continue
+        pool_idx = pool.index[pool.disease == c].to_numpy()
+        val_idx += list(rng.choice(pool_idx, size=quota[c], replace=False))
+    val_idx = list(rng.permutation(val_idx))
+
+    fit = train.drop(index=val_idx)
+    val = train.loc[val_idx]
+
+    assert len(val) == n
+    assert set(val.index) & set(fit.index) == set()
+    assert set(val.disease) <= set(fit.disease)
+    assert fit.disease.value_counts().reindex(train.disease.unique()).min() >= MIN_FIT_SUPPORT
+    assert all(
+        _content_words(row.question).isdisjoint(label_words[row.disease]) for row in val.itertuples()
+    )
+
+    return SplitResult(fit=fit, val=val, val_classes=sorted(val.disease.unique()))
 
 
 def make_random_split(train: pd.DataFrame, seed: int = SEED) -> SplitResult:

@@ -1,0 +1,13 @@
+Stage	Parameter	Value used	Library default	Changed?	Source
+Case folding	lowercase	True	True	No	default
+Tokenisation	token_pattern	(?u)\b\w\w+\b	(?u)\b\w\w+\b	No	default
+N-grams	ngram_range	(1, 1)	(1, 1)	No	grid
+Stop words	stop_words	None	None	No	grid
+DF floor	min_df	1	1	No	grid
+DF ceiling	max_df	1.0	1.0	No	fixed
+Term weighting	sublinear_tf	False	False	No	grid
+IDF	use_idf	True	True	No	default
+IDF smoothing	smooth_idf	True	True	No	default
+Normalisation	norm	l2	l2	No	default
+Lemmatisation	spaCy model / enabled	en_core_web_sm / disabled	n/a (not a TfidfVectorizer parameter)	No	ablation
+BERT tokenisation	WordPiece: max_length/padding/truncation	not frozen -- config.py HYPERPARAMETERS.bert_model_name and max_length are None as of this run (Arm 2 not yet run/selected)	model_max_length=512 (BERT-family default)	-	pending

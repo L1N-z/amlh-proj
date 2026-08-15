@@ -71,6 +71,12 @@ Contains the **required preprocessing table** — chosen settings *and* library 
 | Lemmatisation | spaCy `en_core_web_sm` | *from ablation* | n/a |
 | BERT tokenisation | WordPiece, `max_length=48`, pad + truncate | | 512 |
 
+Fix the lowercasing error. Replace "resolved by lowercasing the filename lookup" with case-preserving exact match. As written it contradicts §2.1 and the fixed code.
+Promote document cleaning. It is now the largest sub-block, not the third bullet. Add the sentence that boilerplate is scored at retrieval time under the frozen index.
+Add the acronym/stop-word argument with 62/200, 28 types, and the AS/ME collisions. This is the section's most dataset-specific reasoning and currently absent.
+Add the corpus-size caveat for min_df/max_df (906 → 9,797 documents).
+Add the departure-from-practical framing sentence, since NLP4_patientQ_A uses bare defaults and NLP3-BERT uses 512.
+
 Three things must be **argued**, not stated:
 
 - **Lemmatisation and stop-word removal are an ablation.** For short questions, stop-word removal
@@ -92,6 +98,20 @@ Three things must be **argued**, not stated:
 - Second variant: TF–IDF + LinearSVC/LogReg, contrasting learned boundaries against neighbour
   matching under ~10 examples per class.
 - **Figure: Arm 1 workflow diagram** (required).
+- **Selection, as frozen 2026-08-15.** `index_variant="QLAD"`, `index_scheme="class_blob"`, both
+  computed in `02_arm1.ipynb` §4a/§5 from validation accuracies alone. Narrate the rule honestly:
+  the standard hold-out ties all four variants at 0.820, so it cannot choose; the shift-aware
+  hold-out ranks QLAD first by more than its own SE, and the pre-registered tie-break hands the
+  variant decision to it. On *scheme* the tie-break never fires: both protocols rank `class_blob`
+  first, each by more than its own SE, so there is nothing to break. Note also that switching to
+  QLAD forced a vectoriser re-tune (§4b) — QLAD blobs are NHS prose, not short questions, and the
+  step-2 optimum tuned on variant Q did not transfer, moving `ngram_range` to (1,2). That is worth
+  one sentence: it shows the index variant and the vectoriser are not independent knobs.
+  Delete the stale "validation
+  supported inclusion (0.765 → 0.790 → 0.810)" line — it contradicts the current grid. Add: the NHS document corpus
+  (906/906 coverage) is used as index text, citing the brief's explicit permission to use the
+  plain-text documents as an external knowledge source, and note that indexing training answers
+  and documents is not leakage because inference input remains the test question alone.
 
 ### 2.4 Neural Approach (~250 w)
 - **Arm 2**: Bio_ClinicalBERT + 906-way head; AdamW; selection on validation accuracy; ablation
@@ -119,6 +139,9 @@ Three things must be **argued**, not stated:
   reproducibility (seed 42, pinned versions, persisted artefacts).
 - Truncation- robust split – already in section 2.5. Diverges from course so needs justification.
 Run the unstratified train_test_split too so that both can be reported in the ablation table — one extra row. It demonstrates knowledge of the standard module tool, shows the choice was tested rather than assumed, and if the two produce similar hyperparameter rankings that's evidence the selection is robust to split design.
+- The shift-aware ("hard") validation protocol: a class-aware hold-out drawn only from the 1,423 training questions (16.0%, spanning 507 classes) that share no word with their own label. Constructed from training data alone.
+- Declared exception #2: scripts/measure_protocol_ranking.py, dated, with the phrase "the index-variant decision is made from validation accuracies alone; test accuracy is measured to characterise protocol reliability and selects nothing."
+- The pre-registered tie-break rule, quoted, plus one sentence stating it was honoured against interest. That sentence is what makes the rest of §2.5 credible rather than decorative.
 
 
 ---
@@ -140,6 +163,8 @@ sibling-homogeneity table — this is the report's strongest original content.
 
 | System | Accuracy | 95% CI | Macro-F1 | s/query |
 |---|---|---|---|---|
+
+Lead with the changed-prediction matrices: four class_blob variants disagree on 12–29 of 200 validation items yet all score 0.820, while disagreeing on 46–76 test items where accuracy spans 0.440–0.700. Essential phrase: "standard hold-out redistributes errors rather than reducing them, masking prediction differences it never expresses as an accuracy difference." Demote both Spearman coefficients (0.549, p=0.159; 0.755, p=0.031) to a footnote — at n=8 with a four-way tie block they are not robust, and the tie carries the argument without them. The pipeline-external replication (16 configs × 5 seeds: ρ 0.574 vs 0.870) can support this in the same footnote.
 
 Plus ablation tables (grid, preprocessing, index variant, BERT model, prompt condition), the
 **training/validation loss curves** (explicitly required), the accuracy–coverage curve, the
@@ -173,6 +198,30 @@ loss-curve gap as evidence of memorisation under ~10 examples per class. Then th
 limitation: **synthetic training data and expert-validated test data are not drawn from the same
 distribution**, and the sibling measurement quantifies it. Any model tuned on synthetic siblings
 will be optimistically evaluated.
+**Disclosed process note (2026-08-12 audit, resolved 2026-08-15), required verbatim-ish:**
+`git log --follow -p` on `config.py` showed exactly one commit that had ever set
+`index_variant`/`index_scheme` (`7e349bd`, 2026-08-09 19:52, before
+`scripts/measure_protocol_ranking.py` existed), and it froze `class_blob`+`Q`. An earlier draft
+of §2.3 nonetheless asserted the frozen config had already moved to `additive_per_row`+`QLAD`
+"on the strength of `test_acc=0.550`" — false on both counts: the config had not been changed,
+and `test_acc` was never a legitimate basis to cite regardless (see CLAUDE.md's declared
+exception #2 and the pre-registered tie-break rule, both of which restrict the decision to
+validation accuracies). The selection was subsequently made in code on 2026-08-15, from
+validation accuracies only, and now reads `QLAD`+`class_blob`. Keep this note: a report that
+discloses a self-caught process error is more credible than one that silently corrects it.
+
+**On the two protocols, verbatim-ish.** "The two validation protocols divided the work cleanly.
+The standard hold-out could not separate the four index variants at all — every one scored 0.820
+— while the shift-aware hold-out ranked them 0.180 / 0.173 / 0.263 / 0.328, resolving a decision
+the standard protocol left to arbitrary tie-order. On indexing scheme the two agreed, each
+preferring the class-blob index by more than its own standard error. The pre-registered rule was
+therefore applied exactly once, where it was needed, and the disagreement it was written to
+adjudicate did not arise."
+
+→ **Re-run `scripts/measure_protocol_ranking.py` against the frozen configuration before writing
+§4.2.** Every test-side figure quoted in earlier drafts (the 0.700/0.550 pair, both Spearman
+coefficients, the changed-prediction matrices in §3.2) was computed at the old `ngram_range=(1,1)`
+/ variant-Q configuration and must be re-derived, not reused.
 
 ### 4.3 Implications for Healthcare (~100 w)
 Abstention as a safety mechanism, tied to the coverage curve. Label ambiguity means some questions

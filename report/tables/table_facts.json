@@ -1,0 +1,249 @@
+{
+  "bert_candidate_tokenizers": {
+    "emilyalsentzer/Bio_ClinicalBERT": {
+      "tokenizer_class": "BertTokenizer",
+      "model_max_length": 1000000000000000019884624838656
+    },
+    "bert-base-uncased": {
+      "tokenizer_class": "BertTokenizer",
+      "model_max_length": 512
+    }
+  },
+  "table1_sklearn_defaults": {
+    "analyzer": "word",
+    "binary": "False",
+    "decode_error": "strict",
+    "dtype": "<class 'numpy.float64'>",
+    "encoding": "utf-8",
+    "input": "content",
+    "lowercase": "True",
+    "max_df": "1.0",
+    "max_features": "None",
+    "min_df": "1",
+    "ngram_range": "(1, 1)",
+    "norm": "l2",
+    "preprocessor": "None",
+    "smooth_idf": "True",
+    "stop_words": "None",
+    "strip_accents": "None",
+    "sublinear_tf": "False",
+    "token_pattern": "(?u)\\b\\w\\w+\\b",
+    "tokenizer": "None",
+    "use_idf": "True",
+    "vocabulary": "None"
+  },
+  "table1_frozen_values": {
+    "ngram_range": "(1, 1)",
+    "stop_words": "None",
+    "min_df": 1,
+    "max_df": 1.0,
+    "sublinear_tf": false,
+    "lemmatise": false,
+    "index_variant": "Q",
+    "index_scheme": "class_blob"
+  },
+  "table5_std_val_n": 200,
+  "table5_std_val_n_classes": 102,
+  "table5_hard_val_n": 400,
+  "table5_hard_val_n_classes": 400,
+  "table5_frozen_test_acc_available": false,
+  "table5_se_std_val_pp": 2.9,
+  "table5_se_hard_val_pp": 1.92,
+  "table5_rows": [
+    {
+      "name": "Frozen configuration (baseline)",
+      "std_acc": 0.785,
+      "hard_acc": 0.18,
+      "vocab_size": 4257,
+      "is_baseline": true
+    },
+    {
+      "name": "ngram_range=(1,2)",
+      "std_acc": 0.745,
+      "hard_acc": 0.205,
+      "vocab_size": 29181,
+      "is_baseline": false
+    },
+    {
+      "name": "min_df=2",
+      "std_acc": 0.49,
+      "hard_acc": 0.0775,
+      "vocab_size": 2052,
+      "is_baseline": false
+    },
+    {
+      "name": "sublinear_tf=True",
+      "std_acc": 0.79,
+      "hard_acc": 0.225,
+      "vocab_size": 4257,
+      "is_baseline": false
+    },
+    {
+      "name": "stop_words='english'",
+      "std_acc": 0.765,
+      "hard_acc": 0.1825,
+      "vocab_size": 4056,
+      "is_baseline": false
+    },
+    {
+      "name": "Lemmatisation enabled (en_core_web_sm, stop words kept as frozen)",
+      "std_acc": 0.81,
+      "hard_acc": 0.215,
+      "vocab_size": 3472,
+      "is_baseline": false
+    },
+    {
+      "name": "NHS documents uncleaned (boilerplate retained; no-op under frozen variant 'Q', which has no D component)",
+      "std_acc": 0.785,
+      "hard_acc": 0.18,
+      "vocab_size": 4257,
+      "is_baseline": false
+    },
+    {
+      "name": "index_variant=QL",
+      "std_acc": 0.795,
+      "hard_acc": 0.1725,
+      "vocab_size": 4333,
+      "is_baseline": false
+    },
+    {
+      "name": "index_variant=QLA",
+      "std_acc": 0.77,
+      "hard_acc": 0.2625,
+      "vocab_size": 10924,
+      "is_baseline": false
+    },
+    {
+      "name": "index_variant=QLAD",
+      "std_acc": 0.835,
+      "hard_acc": 0.3275,
+      "vocab_size": 16671,
+      "is_baseline": false
+    }
+  ],
+  "boilerplate": {
+    "n_documents": 906,
+    "counted": "all 906 NHS_DOCS_DIR .txt files, characters removed by amlh.features._strip_boilerplate (blank lines, exact-match nav/footer lines in _DROP_EXACT, prefix-match footer lines in _DROP_PREFIX, and URL substrings matched by _URL_RE)",
+    "total_chars_before": 4068197,
+    "total_chars_after": 3866616,
+    "aggregate_pct_removed": 4.955,
+    "mean_of_per_document_pct_removed": 5.5859,
+    "median_per_document_pct_removed": 3.4089,
+    "max_per_document_pct_removed": 66.3884,
+    "draft_placeholder_22pct": "NOT reproduced by this measurement -- aggregate is 4.96%, mean-per-document is 5.59%; neither is close to 22%. The 4.96% figure IS reproduced exactly.",
+    "verdict": "4.96% (aggregate) is correct; the ~22% figure in CLAUDE.md / the outline draft does not match the code as written and should not be cited without further investigation."
+  },
+  "truncation_at_max_length_48": {
+    "note": "token counts INCLUDE [CLS] and [SEP] special tokens",
+    "by_model": {
+      "emilyalsentzer/Bio_ClinicalBERT": {
+        "train": {
+          "n": 8891,
+          "truncation_rate_pct": 0.0,
+          "n_over": 0,
+          "max_tokens": 44,
+          "mean_tokens": 13.836,
+          "longest_question": "What should I do if I or my child has shortness of breath, a high temperature that does not come down after taking paracetamol or ibuprofen, confusion, or seizures?",
+          "longest_question_tokens_incl_special": 44
+        },
+        "test": {
+          "n": 200,
+          "truncation_rate_pct": 0.0,
+          "n_over": 0,
+          "max_tokens": 34,
+          "mean_tokens": 12.45,
+          "longest_question": "What should I do if I hit my head at speed, such as in a car crash, being hit by a car or bike, or a diving accident?",
+          "longest_question_tokens_incl_special": 34
+        }
+      },
+      "bert-base-uncased": {
+        "train": {
+          "n": 8891,
+          "truncation_rate_pct": 0.0,
+          "n_over": 0,
+          "max_tokens": 42,
+          "mean_tokens": 13.434,
+          "longest_question": "What should I do if I or my child has shortness of breath, a high temperature that does not come down after taking paracetamol or ibuprofen, confusion, or seizures?",
+          "longest_question_tokens_incl_special": 42
+        },
+        "test": {
+          "n": 200,
+          "truncation_rate_pct": 0.0,
+          "n_over": 0,
+          "max_tokens": 34,
+          "mean_tokens": 12.125,
+          "longest_question": "What should I do if I hit my head at speed, such as in a car crash, being hit by a car or bike, or a diving accident?",
+          "longest_question_tokens_incl_special": 34
+        }
+      }
+    }
+  },
+  "longest_question_words": {
+    "train_max_words": 29,
+    "test_max_words": 28
+  },
+  "high_df_terms_ge_95pct": {
+    "raw": 22,
+    "cleaned": 13,
+    "draft_claim_22_to_13": "reproduced exactly: 22 -> 13"
+  },
+  "acronym_stopword_intersection": {
+    "regex": "\\b[A-Z]{2,}\\b",
+    "searched_in": "raw training question text and raw disease-label strings (underscores replaced with spaces); disease labels contributed zero acronym hits (no label string is fully upper-case)",
+    "n_distinct_uppercase_acronym_tokens_in_train_questions": 155,
+    "intersection_with_sklearn_english_stop_words": [
+      "as",
+      "me"
+    ],
+    "test_questions_containing_an_acronym": {
+      "n_with_acronym": 62,
+      "n_total": 200,
+      "n_distinct_types": 28
+    }
+  },
+  "single_char_token_dependency": {
+    "default_token_pattern": "(?u)\\b\\w\\w+\\b",
+    "effect": "requires >=2 word characters, so a bare single-letter token (e.g. the 'a' in 'hepatitis a' or 'd' in 'vitamin d') is dropped entirely by the default TfidfVectorizer tokenisation -- both in the class-label (L) index component and in any training/test question that mentions it.",
+    "label_families_that_depend_on_a_single_trailing_character": {
+      "hepatitis": [
+        "hepatitis_a",
+        "hepatitis_b",
+        "hepatitis_c"
+      ],
+      "vitamins_and_minerals_vitamin": [
+        "vitamins_and_minerals_vitamin_a",
+        "vitamins_and_minerals_vitamin_b",
+        "vitamins_and_minerals_vitamin_c",
+        "vitamins_and_minerals_vitamin_d",
+        "vitamins_and_minerals_vitamin_e",
+        "vitamins_and_minerals_vitamin_k"
+      ]
+    }
+  },
+  "missing_and_duplicates": {
+    "train": {
+      "n_rows": 8891,
+      "missing_per_column": {
+        "question": 0,
+        "answer": 0,
+        "disease": 0,
+        "reference_url": 0
+      },
+      "exact_duplicate_rows": 0,
+      "duplicate_question_strings": 105,
+      "duplicate_question_disease_pairs": 0
+    },
+    "test": {
+      "n_rows": 200,
+      "missing_per_column": {
+        "question": 0,
+        "disease": 0,
+        "reference_url": 0
+      },
+      "exact_duplicate_rows": 0,
+      "duplicate_question_strings": 0,
+      "duplicate_question_disease_pairs": 0
+    },
+    "note": "test row is read excluding `answer` (dropped immediately after read_csv, before any inspection), per CLAUDE.md hard rule #1."
+  }
+}

@@ -3,7 +3,12 @@ import math
 import pytest
 from sklearn.metrics import f1_score
 
-from amlh.evaluate import accuracy_at_k, accuracy_coverage_curve, score_ranked
+from amlh.evaluate import (
+    accuracy_at_k,
+    accuracy_coverage_curve,
+    pairwise_top1_disagreement,
+    score_ranked,
+)
 
 RANKED = [
     ["a", "b", "c"],
@@ -39,6 +44,15 @@ def test_score_ranked_regression_matches_independent_oracle():
         "mrr": expected_mrr,
     }
     assert score_ranked(RANKED, GOLD) == pytest.approx(expected)
+
+
+def test_pairwise_top1_disagreement():
+    top1 = {"a": ["x", "y", "z"], "b": ["x", "z", "z"], "c": ["q", "y", "z"]}
+    matrix = pairwise_top1_disagreement(top1)
+    assert matrix.loc["a", "b"] == matrix.loc["b", "a"] == 1
+    assert matrix.loc["a", "c"] == matrix.loc["c", "a"] == 1
+    assert matrix.loc["b", "c"] == matrix.loc["c", "b"] == 2
+    assert matrix.loc["a", "a"] == 0
 
 
 def test_accuracy_coverage_curve():

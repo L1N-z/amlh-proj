@@ -75,6 +75,16 @@ def test_run_indexing_scheme_comparison_smoke(tiny_split):
     assert additive_rows == len(fit_small) + n_classes  # "Q" per-row + "L" one row/class
 
 
+def test_run_variant_scheme_grid_smoke(tiny_split):
+    fit_small, val_small = tiny_split
+    df = ae.run_variant_scheme_grid(fit_small, val_small, ["Q", "QL"], VEC_KWARGS, k=1)
+    assert len(df) == 4  # 2 schemes x 2 variants
+    assert set(df["scheme"]) == {"class_blob", "additive_per_row"}
+    assert set(df["variant"]) == {"Q", "QL"}
+    expected_cols = {"scheme", "variant", "accuracy", "acc_at_5", "macro_f1", "mrr"}
+    assert expected_cols <= set(df.columns)
+
+
 def test_run_split_robustness_smoke(train):
     configs = [
         {"ngram_range": (1, 1), "sublinear_tf": False, "min_df": 1, "stop_words": None, "k": 1},

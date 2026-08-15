@@ -126,6 +126,30 @@ def run_indexing_scheme_comparison(
     return pd.DataFrame(rows)
 
 
+def run_variant_scheme_grid(
+    fit_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    variants: list[str],
+    vec_kwargs: dict,
+    k: int,
+    schemes: tuple[str, ...] = ("class_blob", "additive_per_row"),
+) -> pd.DataFrame:
+    """Score every (scheme, variant) combination on a single (fit_df, val_df)
+    pair. Agnostic to what val_df is — standard val, hard val, or test; the
+    caller decides that, this function only runs the grid."""
+    builders = {"class_blob": features.build_index, "additive_per_row": features.build_index_additive}
+    gold = val_df["disease"].tolist()
+    queries = val_df["question"].tolist()
+    rows = []
+    for scheme in schemes:
+        builder = builders[scheme]
+        for variant in variants:
+            index_texts, index_labels = builder(fit_df, variant)
+            ranked, _ = arm1_tfidf.knn_rank(index_texts, index_labels, queries, k, vec_kwargs)
+            rows.append(_score_row(ranked, gold, {"scheme": scheme, "variant": variant}))
+    return pd.DataFrame(rows)
+
+
 def run_split_robustness(
     train_df: pd.DataFrame,
     configs: list[dict],

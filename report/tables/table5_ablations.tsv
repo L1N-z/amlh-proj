@@ -1,0 +1,11 @@
+Variant	Hold-out acc	Shift-aware acc	Δ vs frozen (shift-aware)	Vocab size	Test acc (frozen row only)
+Frozen configuration (baseline)	0.785	0.180	0.000 (baseline)	4257	not run
+ngram_range=(1,2)	0.745	0.205	+0.025	29181	—
+min_df=2	0.490	0.077	-0.102	2052	—
+sublinear_tf=True	0.790	0.225	+0.045	4257	—
+stop_words='english'	0.765	0.182	+0.003	4056	—
+Lemmatisation enabled (en_core_web_sm, stop words kept as frozen)	0.810	0.215	+0.035	3472	—
+NHS documents uncleaned (boilerplate retained; no-op under frozen variant 'Q', which has no D component)	0.785	0.180	+0.000	4257	—
+index_variant=QL	0.795	0.172	-0.008	4333	—
+index_variant=QLA	0.770	0.263	+0.083	10924	—
+index_variant=QLAD	0.835	0.328	+0.148	16671	—

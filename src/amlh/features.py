@@ -53,6 +53,19 @@ def load_class_doc(disease: str) -> str:
     return _strip_boilerplate(path.read_text(encoding="utf-8-sig"))
 
 
+def term_class_coverage(diseases) -> dict[str, int]:
+    """For each token (sklearn's default token pattern `(?u)\\b\\w\\w+\\b`,
+    lowercased) appearing in at least one class's NHS document, the number of
+    distinct classes among `diseases` whose document contains it."""
+    token_re = re.compile(r"(?u)\b\w\w+\b")
+    counts: dict[str, int] = {}
+    for d in diseases:
+        tokens = set(token_re.findall(load_class_doc(d).lower()))
+        for t in tokens:
+            counts[t] = counts.get(t, 0) + 1
+    return counts
+
+
 def doc_coverage(diseases) -> dict:
     """NHS class-document coverage over `diseases` (case-insensitive filename match)."""
     idx = _filename_index()

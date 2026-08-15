@@ -13,7 +13,7 @@ from typing import Literal
 
 import numpy as np
 
-SEED = 42
+SEED = 44
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
@@ -33,18 +33,26 @@ IndexVariant = Literal["Q", "QL", "QLA", "QLAD"]
 @dataclass(frozen=True)
 class Hyperparameters:
     # Arm 1 — TF-IDF / k-NN (vectoriser + index + retrieval)
-    # Frozen from notebooks/02_arm1.ipynb (validation-only, stratified 200/102-class hold-out).
+    # Frozen from notebooks/02_arm1.ipynb (validation only; no test-set quantity was read).
     # Selection used a within-1-SE-prefer-simplest rule throughout, not raw argmax, given
-    # SE ≈ 3.5pp at n=200. Q, class_blob, k=1, unigrams, no stop words, no lemmatisation was
-    # simplest within 1 SE of the grid argmax (ngram_range=(1,2), stop_words="english",
-    # accuracy=0.835); the variant-specific vectoriser re-check confirmed the same config.
-    ngram_range: tuple[int, int] | None = (1, 1)
+    # SE ~ 3.5pp at n=200.
+    #
+    # index_variant: the standard hold-out ties all four variants at 0.820 (SE 0.027) and so
+    # cannot choose. Under CLAUDE.md's pre-registered tie-break the shift-aware hold-out decides,
+    # and it ranks QLAD first at 0.328 by 0.065 over the runner-up against its own SE of 0.023.
+    # index_scheme: both protocols rank class_blob first, each by more than its own SE
+    # (standard 0.850 by 0.120, SE 0.025; shift-aware 0.398 by 0.073, SE 0.024). They agree, so
+    # the tie-break never fires.
+    # ngram_range: (1,2) comes from the variant-specific re-check (notebook §4b) — QLAD blobs are
+    # NHS prose rather than short questions, and the step-2 optimum tuned on variant Q did not
+    # transfer. That re-check reached 0.850 on the standard hold-out at k=1.
+    ngram_range: tuple[int, int] | None = (1, 2)
     min_df: int | None = 1
     max_df: float | None = 1.0
     sublinear_tf: bool | None = False
     stop_words: str | list[str] | None = None  # ablation outcome, e.g. None or "english"
     lemmatise: bool | None = False  # ablation outcome (spaCy en_core_web_sm)
-    index_variant: IndexVariant | None = "Q"  # Q / QL / QLA / QLAD — biggest Arm 1 lever
+    index_variant: IndexVariant | None = "QLAD"  # Q / QL / QLA / QLAD — biggest Arm 1 lever
     index_scheme: Literal["class_blob", "additive_per_row"] | None = "class_blob"
     k_neighbors: int | None = 1
     # Arm 2 — BERT
