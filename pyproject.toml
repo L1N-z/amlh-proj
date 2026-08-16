@@ -8,6 +8,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+bert = ["torch", "transformers"]
 
 [build-system]
 requires = ["setuptools>=61"]
