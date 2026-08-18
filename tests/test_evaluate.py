@@ -1,11 +1,14 @@
 import math
 
+import numpy as np
 import pytest
 from sklearn.metrics import f1_score
 
+from amlh.config import SEED
 from amlh.evaluate import (
     accuracy_at_k,
     accuracy_coverage_curve,
+    bootstrap_accuracy_ci,
     mcnemar_exact,
     pairwise_top1_disagreement,
     score_ranked,
@@ -101,6 +104,70 @@ def test_mcnemar_exact_rejects_misaligned_inputs():
         mcnemar_exact(["a", "b"], ["a"], ["a", "b"])
     with pytest.raises(ValueError):
         mcnemar_exact([], [], [])
+
+
+def test_bootstrap_accuracy_ci_rejects_misaligned_inputs():
+    with pytest.raises(ValueError):
+        bootstrap_accuracy_ci(["a", "b"], ["a"])
+    with pytest.raises(ValueError):
+        bootstrap_accuracy_ci([], [])
+
+
+def test_bootstrap_accuracy_ci_all_correct_has_zero_width_interval():
+    pred = ["a", "b", "c", "d"]
+    gold = ["a", "b", "c", "d"]
+    result = bootstrap_accuracy_ci(pred, gold, n_boot=500)
+    assert result["accuracy"] == pytest.approx(1.0)
+    assert result["ci_low"] == pytest.approx(1.0)
+    assert result["ci_high"] == pytest.approx(1.0)
+
+
+def test_bootstrap_accuracy_ci_deterministic_under_fixed_seed():
+    pred = ["a", "b", "x", "d", "y", "f"]
+    gold = ["a", "b", "c", "d", "e", "f"]
+    result1 = bootstrap_accuracy_ci(pred, gold, n_boot=1000, seed=123)
+    result2 = bootstrap_accuracy_ci(pred, gold, n_boot=1000, seed=123)
+    assert result1["ci_low"] == result2["ci_low"]
+    assert result1["ci_high"] == result2["ci_high"]
+
+
+def test_bootstrap_accuracy_ci_different_seed_gives_similar_but_different_interval():
+    # 200 items (fine enough quantile resolution that two seeds' bootstrap
+    # samples are very unlikely to land on the exact same percentile value).
+    data_rng = np.random.default_rng(42)
+    outcomes = data_rng.random(200) < 0.7
+    pred = ["a" if correct else "b" for correct in outcomes]
+    gold = ["a"] * 200
+
+    result1 = bootstrap_accuracy_ci(pred, gold, n_boot=2000, seed=1)
+    result2 = bootstrap_accuracy_ci(pred, gold, n_boot=2000, seed=2)
+    assert (result1["ci_low"], result1["ci_high"]) != (result2["ci_low"], result2["ci_high"])
+    assert result1["ci_low"] == pytest.approx(result2["ci_low"], abs=0.05)
+    assert result1["ci_high"] == pytest.approx(result2["ci_high"], abs=0.05)
+
+
+def test_bootstrap_accuracy_ci_point_estimate_matches_plain_accuracy():
+    pred = ["a", "b", "x", "d", "y", "f", "g", "x", "i", "x"]
+    gold = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
+    expected_accuracy = sum(p == g for p, g in zip(pred, gold)) / len(gold)
+    result = bootstrap_accuracy_ci(pred, gold, n_boot=2000, seed=7)
+    assert result["accuracy"] == pytest.approx(expected_accuracy)
+    assert result["ci_low"] <= result["accuracy"] <= result["ci_high"]
+    assert result["n"] == len(gold)
+    assert result["n_boot"] == 2000
+
+
+def test_bootstrap_accuracy_ci_coverage_sanity_check():
+    """For a known Bernoulli(p=0.7) process at n=200, the 95% CI width should
+    land in a plausible range -- a correctness check, not a statistics exam."""
+    data_rng = np.random.default_rng(999)
+    outcomes = data_rng.random(200) < 0.7
+    pred = ["a" if correct else "b" for correct in outcomes]
+    gold = ["a"] * 200
+
+    result = bootstrap_accuracy_ci(pred, gold, n_boot=5000, seed=SEED)
+    width = result["ci_high"] - result["ci_low"]
+    assert 0.05 < width < 0.15
 
 
 def test_accuracy_coverage_curve():

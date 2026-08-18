@@ -1,13 +1,17 @@
 """Scoring for ranked disease predictions, plus paired system comparison.
 
 `score_ranked` and friends score a single ranked run; `mcnemar_exact` compares
-two runs over the same query set. Bootstrap CIs are not here yet.
+two runs over the same query set; `bootstrap_accuracy_ci` gives a single run's
+accuracy a confidence interval.
 """
 
 import math
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score
+
+from amlh.config import SEED
 
 
 def accuracy_at_k(ranked: list[list[str]], gold: list[str], k: int) -> float:
@@ -81,6 +85,51 @@ def mcnemar_exact(
         "only_b_correct": only_b_correct,
         "n_discordant": n_discordant,
         "p_value": p_value,
+    }
+
+
+def bootstrap_accuracy_ci(
+    pred: list[str],
+    gold: list[str],
+    n_boot: int = 10_000,
+    alpha: float = 0.05,
+    seed: int = SEED,
+) -> dict[str, float]:
+    """Percentile bootstrap 95% CI for one system's top-1 accuracy.
+
+    Resamples *items*, not classes or predictions in isolation, because the
+    estimand is overall accuracy over the hold-out and each item is an iid
+    draw from it — resampling any other unit would answer a different
+    question. Uses a local `numpy.random.default_rng(seed)` rather than
+    global NumPy state, so this stochastic stage cannot perturb the RNG
+    surrounding code depends on; re-seed explicitly if calling it more than
+    once in a pipeline.
+
+    When every item is correct (or every item is wrong), every bootstrap
+    resample gives the same accuracy, so `ci_low == ci_high == accuracy`.
+    That is the correct behaviour, not a bug: the bootstrap has zero
+    resampling variance to express as uncertainty. Arm 1's per-class slices
+    are small enough to hit this routinely.
+    """
+    if len(pred) != len(gold):
+        raise ValueError("pred and gold must be query-aligned and the same length")
+    if not gold:
+        raise ValueError("cannot compute a confidence interval over an empty query set")
+
+    n = len(gold)
+    correct = np.array([p == g for p, g in zip(pred, gold)], dtype=float)
+
+    rng = np.random.default_rng(seed)
+    resample_idx = rng.integers(0, n, size=(n_boot, n))
+    boot_accuracies = correct[resample_idx].mean(axis=1)
+    ci_low, ci_high = np.quantile(boot_accuracies, [alpha / 2, 1 - alpha / 2])
+
+    return {
+        "accuracy": correct.mean(),
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "n": n,
+        "n_boot": n_boot,
     }
 
 
