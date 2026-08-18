@@ -53,6 +53,26 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
 
    All three are computed in the notebook from validation accuracies alone and printed with their
    margins and SEs; none reads `test_acc`.
+
+   **Arm 2 encoder tie-break rule (recorded 2026-08-17, formalised after the comparison was
+   seen — disclose this timing in the report).** Bio_ClinicalBERT and `bert-base-uncased` are
+   compared on the standard hold-out with **McNemar's exact test** over the discordant pairs, not
+   by judging an accuracy difference against a single-proportion SE: both encoders predict the
+   same 200 items, so the comparison is paired and the items they agree on carry no evidence.
+   If McNemar returns p ≥ 0.05 the comparison is **reported as unresolved** and Bio_ClinicalBERT
+   is kept on the declared prior that an in-domain clinical encoder is the appropriate default
+   for a clinical task. **This can and does retain the lower-scoring encoder** — that is the
+   intended behaviour of a prior, and the report must say so rather than imply accuracy chose it.
+   Only when McNemar resolves the comparison does measured accuracy decide.
+
+   Provenance, to be stated in the report: an earlier implementation applied this preference as a
+   hardcoded fallback in a notebook cell, gated on a hand-rolled single-proportion SE rather than
+   a paired test, and it was never written down as a rule. It is recorded here now, with the
+   instrument corrected to McNemar. Unlike the Arm 1 tie-break above, it was **not** pre-registered
+   before the numbers were seen.
+
+   Epoch/checkpoint selection *within* each encoder is unchanged: standard hold-out,
+   within-1-SE-prefer-fewest-epochs.
 3. **Never state a number that was not printed by code you just ran.** No estimated, recalled or
    plausible metrics — in code comments, in notebook markdown, or in chat.
 4. **`SEED = 44`** from `config.py`. Re-seed before every stochastic stage.

@@ -135,7 +135,7 @@ def test_run_epoch_returns_finite_loss(tiny_bert, tiny_tokeniser):
 
 def test_train_model_history_shape(tiny_bert, tiny_tokeniser, label_to_id, tiny_frame):
     fit_df, val_df = tiny_frame
-    best_state, history_df = ab.train_model(
+    best_state, history_df, ranked_by_epoch = ab.train_model(
         fit_df,
         val_df,
         label_to_id,
@@ -152,6 +152,36 @@ def test_train_model_history_shape(tiny_bert, tiny_tokeniser, label_to_id, tiny_
     assert len(history_df) == 2
     assert isinstance(best_state, dict)
     assert len(best_state) > 0
+    assert isinstance(ranked_by_epoch, dict)
+    assert set(ranked_by_epoch) == {0, 1}
+
+
+def test_train_model_captures_predictions_matching_history(
+    tiny_bert, tiny_tokeniser, label_to_id, tiny_frame
+):
+    """The captured per-epoch rankings must be the ones that produced the
+    accuracies in history_df — otherwise McNemar would compare a different
+    checkpoint from the one selection ranked."""
+    fit_df, val_df = tiny_frame
+    _, history_df, ranked_by_epoch = ab.train_model(
+        fit_df,
+        val_df,
+        label_to_id,
+        model_name="unused-with-injected-model",
+        lr=1e-4,
+        batch_size=2,
+        epochs=2,
+        max_length=8,
+        seed=44,
+        model=tiny_bert,
+        tokeniser=tiny_tokeniser,
+    )
+    gold = val_df["disease"].tolist()
+    for epoch, ranked in ranked_by_epoch.items():
+        assert len(ranked) == len(val_df)
+        recomputed = sum(r[0] == g for r, g in zip(ranked, gold)) / len(gold)
+        logged = history_df.loc[history_df["epoch"] == epoch, "val_accuracy"].iloc[0]
+        assert recomputed == pytest.approx(logged)
 
 
 def test_predict_ranked_shape_and_labels(tiny_bert, tiny_tokeniser, label_to_id):
@@ -168,6 +198,21 @@ def test_predict_ranked_shape_and_labels(tiny_bert, tiny_tokeniser, label_to_id)
         assert all(label in id_to_label.values() for label in row)
 
 
+def test_predict_ranked_full_depth_when_top_k_none(tiny_bert, tiny_tokeniser, label_to_id):
+    """top_k=None must rank every label — MRR over a truncated ranking is MRR@k,
+    which would not be comparable to Arm 1's full-depth ranking."""
+    id_to_label = {i: label for label, i in label_to_id.items()}
+    device = torch.device("cpu")
+    tiny_bert.to(device)
+    ranked = ab.predict_ranked(
+        tiny_bert, tiny_tokeniser, ["hello cough", "sore ache"], id_to_label,
+        max_length=8, batch_size=2, device=device, top_k=None,
+    )
+    for row in ranked:
+        assert len(row) == len(label_to_id)
+        assert len(set(row)) == len(label_to_id)
+
+
 def test_run_model_ablation_reuses_train_model(monkeypatch, label_to_id, tiny_frame):
     fit_df, val_df = tiny_frame
     calls = []
@@ -182,11 +227,12 @@ def test_run_model_ablation_reuses_train_model(monkeypatch, label_to_id, tiny_fr
                 {"epoch": 1, "train_loss": 0.5, "val_loss": 0.9, "val_accuracy": 0.6},
             ]
         )
-        return {"dummy": "state"}, history_df
+        ranked_by_epoch = {0: [["disease_a"], ["disease_b"]], 1: [["disease_b"], ["disease_b"]]}
+        return {"dummy": "state"}, history_df, ranked_by_epoch
 
     monkeypatch.setattr(ab, "train_model", stub_train_model)
 
-    summary_df, histories = ab.run_model_ablation(
+    summary_df, histories, ranked_by_epoch_by_model = ab.run_model_ablation(
         fit_df, val_df, label_to_id, ["model-a", "model-b"],
         lr=1e-4, batch_size=2, epochs=2, max_length=8, seed=44,
     )
@@ -197,6 +243,8 @@ def test_run_model_ablation_reuses_train_model(monkeypatch, label_to_id, tiny_fr
     assert shared[0] == shared[1]
     assert set(summary_df["model_name"]) == {"model-a", "model-b"}
     assert set(histories) == {"model-a", "model-b"}
+    assert set(ranked_by_epoch_by_model) == {"model-a", "model-b"}
+    assert set(ranked_by_epoch_by_model["model-a"]) == {0, 1}
 
 
 def test_measure_run_reports_wall_clock():

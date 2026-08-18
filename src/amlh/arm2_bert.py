@@ -103,15 +103,21 @@ def predict_ranked(
     max_length: int,
     batch_size: int,
     device,
+    top_k: int | None = 5,
 ) -> list[list[str]]:
-    """Ranked (best-first) label predictions, top-5, order-aligned to `questions`."""
+    """Ranked (best-first) label predictions, order-aligned to `questions`.
+
+    `top_k=None` ranks every label. Pass it wherever MRR is reported: a
+    truncated ranking silently scores MRR@k instead, and Arm 1 ranks all
+    classes, so a top-5 Arm 2 ranking would not be comparable to it.
+    """
     encodings = tokenise(questions, tokeniser, max_length)
     dummy_labels = [0] * len(questions)
     loader = make_loader(encodings, dummy_labels, batch_size, shuffle=False)
 
     model.eval()
     ranked: list[list[str]] = []
-    k = min(5, len(id_to_label))
+    k = len(id_to_label) if top_k is None else min(top_k, len(id_to_label))
     with torch.no_grad():
         for input_ids, attention_mask, _ in loader:
             input_ids = input_ids.to(device)
@@ -134,10 +140,17 @@ def train_model(
     seed: int,
     model=None,
     tokeniser=None,
-) -> tuple[dict, pd.DataFrame]:
-    """Manual AdamW training loop. Returns (best_state_dict, history_df) where
-    history_df has one row per epoch: epoch, train_loss, val_loss, val_accuracy.
-    Best epoch is selected by val_accuracy (ties keep the earlier/fewer-epoch state).
+) -> tuple[dict, pd.DataFrame, dict[int, list[list[str]]]]:
+    """Manual AdamW training loop. Returns (best_state_dict, history_df,
+    ranked_by_epoch) where history_df has one row per epoch: epoch, train_loss,
+    val_loss, val_accuracy. Best epoch is selected by val_accuracy (ties keep the
+    earlier/fewer-epoch state).
+
+    `ranked_by_epoch[epoch]` is the top-5 validation ranking that epoch's model
+    produced — already computed to score the epoch, so keeping it is free. It
+    means per-item predictions at *any* epoch can be recovered afterwards without
+    retraining, which is what McNemar over the encoder ablation needs: the
+    within-1-SE selected epoch is not known until training has finished.
 
     `model`/`tokeniser` are a test-only injection seam: pass pre-built objects to
     skip `from_pretrained` (e.g. a tiny random-init model, no network). Production
@@ -167,6 +180,7 @@ def train_model(
     val_gold = val_df["disease"].tolist()
 
     rows = []
+    ranked_by_epoch: dict[int, list[list[str]]] = {}
     best_state = None
     best_val_accuracy = -1.0
     for epoch in range(epochs):
@@ -179,11 +193,12 @@ def train_model(
         rows.append(
             {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss, "val_accuracy": val_accuracy}
         )
+        ranked_by_epoch[epoch] = ranked
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
-    return best_state, pd.DataFrame(rows)
+    return best_state, pd.DataFrame(rows), ranked_by_epoch
 
 
 def measure_run(fn: Callable, *args, **kwargs) -> tuple[Any, float, float]:
@@ -211,15 +226,19 @@ def run_model_ablation(
     epochs: int,
     max_length: int,
     seed: int,
-) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, dict[int, list[list[str]]]]]:
     """Trains each encoder in `model_names` with identical hyperparameters via
     `train_model` (no duplicated training logic), re-seeding before each run.
-    Returns a summary row per encoder plus each encoder's full history_df."""
+    Returns a summary row per encoder, each encoder's full history_df, and each
+    encoder's per-epoch validation rankings — the last so the encoders can be
+    compared per-item (McNemar) at whichever epoch selection later picks, without
+    retraining either of them."""
     summary_rows = []
     histories = {}
+    ranked_by_epoch_by_model = {}
     for model_name in model_names:
         config.set_seed(seed)
-        (best_state, history_df), wall_clock_s, peak_memory_mb = measure_run(
+        (best_state, history_df, ranked_by_epoch), wall_clock_s, peak_memory_mb = measure_run(
             train_model,
             fit_df,
             val_df,
@@ -233,6 +252,7 @@ def run_model_ablation(
         )
         best_row = history_df.loc[history_df["val_accuracy"].idxmax()]
         histories[model_name] = history_df
+        ranked_by_epoch_by_model[model_name] = ranked_by_epoch
         summary_rows.append(
             {
                 "model_name": model_name,
@@ -243,7 +263,7 @@ def run_model_ablation(
                 "peak_memory_mb": peak_memory_mb,
             }
         )
-    return pd.DataFrame(summary_rows), histories
+    return pd.DataFrame(summary_rows), histories, ranked_by_epoch_by_model
 
 
 def select_best_epoch_within_one_se(history_df: pd.DataFrame, n_val: int = 200) -> pd.Series:
