@@ -1,7 +1,7 @@
-"""Scoring for ranked disease predictions.
+"""Scoring for ranked disease predictions, plus paired system comparison.
 
-No bootstrap CI or McNemar's test here yet — those apply to system
-comparisons, and this module only scores a single ranked run.
+`score_ranked` and friends score a single ranked run; `mcnemar_exact` compares
+two runs over the same query set. Bootstrap CIs are not here yet.
 """
 
 import math
@@ -29,6 +29,59 @@ def score_ranked(ranked: list[list[str]], gold: list[str]) -> dict[str, float]:
     mrr = sum(_rr(r, g) for r, g in zip(ranked, gold)) / len(gold)
 
     return {"accuracy": accuracy, "acc_at_5": acc_at_5, "macro_f1": macro_f1, "mrr": mrr}
+
+
+def mcnemar_exact(
+    pred_a: list[str], pred_b: list[str], gold: list[str]
+) -> dict[str, float]:
+    """Exact McNemar test on two systems' top-1 predictions over the same,
+    query-aligned items.
+
+    The comparison is paired — both systems predict the same queries — so items
+    the two agree on carry no evidence about which is better, and the test
+    conditions on the discordant pairs alone. That is why a difference of two
+    accuracies must not be judged against a single-proportion standard error:
+    that SE ignores the pairing and answers a different question.
+
+    The exact binomial tail is used rather than the chi-square approximation
+    because the discordant count over a 200-item hold-out is small, and the
+    approximation is unreliable below ~25 discordant pairs. Under the null the
+    binomial is symmetric (p=0.5), so the two-sided p-value is twice the lower
+    tail, capped at 1.
+
+    Returns the discordant counts alongside the p-value so the report can quote
+    the pair counts the test actually consumed, not just its verdict.
+    """
+    if not len(pred_a) == len(pred_b) == len(gold):
+        raise ValueError("pred_a, pred_b and gold must be query-aligned and the same length")
+    if not gold:
+        raise ValueError("cannot compare systems over an empty query set")
+
+    correct_a = [p == g for p, g in zip(pred_a, gold)]
+    correct_b = [p == g for p, g in zip(pred_b, gold)]
+    only_a_correct = sum(a and not b for a, b in zip(correct_a, correct_b))
+    only_b_correct = sum(b and not a for a, b in zip(correct_a, correct_b))
+    n_discordant = only_a_correct + only_b_correct
+
+    if n_discordant == 0:
+        p_value = 1.0
+    else:
+        lower_tail = sum(
+            math.comb(n_discordant, i) for i in range(min(only_a_correct, only_b_correct) + 1)
+        )
+        p_value = min(1.0, 2 * lower_tail / 2**n_discordant)
+
+    n = len(gold)
+    return {
+        "n": n,
+        "accuracy_a": sum(correct_a) / n,
+        "accuracy_b": sum(correct_b) / n,
+        "accuracy_diff": (sum(correct_a) - sum(correct_b)) / n,
+        "only_a_correct": only_a_correct,
+        "only_b_correct": only_b_correct,
+        "n_discordant": n_discordant,
+        "p_value": p_value,
+    }
 
 
 def pairwise_top1_disagreement(top1_by_key: dict[str, list[str]]) -> pd.DataFrame:

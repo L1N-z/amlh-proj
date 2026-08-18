@@ -6,6 +6,7 @@ from sklearn.metrics import f1_score
 from amlh.evaluate import (
     accuracy_at_k,
     accuracy_coverage_curve,
+    mcnemar_exact,
     pairwise_top1_disagreement,
     score_ranked,
 )
@@ -53,6 +54,53 @@ def test_pairwise_top1_disagreement():
     assert matrix.loc["a", "c"] == matrix.loc["c", "a"] == 1
     assert matrix.loc["b", "c"] == matrix.loc["c", "b"] == 2
     assert matrix.loc["a", "a"] == 0
+
+
+def test_mcnemar_exact_counts_only_discordant_pairs():
+    gold = ["a", "a", "a", "a", "b", "b"]
+    # items 0,1 both right; item 2 both wrong -> all concordant, no evidence.
+    # items 3,4 only A right; item 5 only B right.
+    pred_a = ["a", "a", "x", "a", "b", "x"]
+    pred_b = ["a", "a", "x", "x", "x", "b"]
+    result = mcnemar_exact(pred_a, pred_b, gold)
+
+    assert result["only_a_correct"] == 2
+    assert result["only_b_correct"] == 1
+    assert result["n_discordant"] == 3
+    assert result["accuracy_a"] == pytest.approx(4 / 6)
+    assert result["accuracy_b"] == pytest.approx(3 / 6)
+    assert result["accuracy_diff"] == pytest.approx(1 / 6)
+
+
+def test_mcnemar_exact_p_value_matches_hand_computed_binomial():
+    # 3 discordant pairs, split 2/1. Two-sided exact p = 2 * P(X <= 1 | n=3, p=0.5)
+    # = 2 * (1 + 3)/8 = 1.0 -- capped at 1.
+    gold = ["a", "a", "a"]
+    pred_a = ["a", "a", "x"]
+    pred_b = ["x", "x", "a"]
+    assert mcnemar_exact(pred_a, pred_b, gold)["p_value"] == pytest.approx(1.0)
+
+    # 6 discordant pairs, all favouring A. Two-sided exact p = 2 * (1/64) = 0.03125.
+    gold = ["a"] * 6
+    pred_a = ["a"] * 6
+    pred_b = ["x"] * 6
+    assert mcnemar_exact(pred_a, pred_b, gold)["p_value"] == pytest.approx(2 / 64)
+
+
+def test_mcnemar_exact_identical_systems_are_unresolved():
+    gold = ["a", "b", "c"]
+    pred = ["a", "b", "x"]
+    result = mcnemar_exact(pred, list(pred), gold)
+    assert result["n_discordant"] == 0
+    assert result["p_value"] == 1.0
+    assert result["accuracy_diff"] == 0.0
+
+
+def test_mcnemar_exact_rejects_misaligned_inputs():
+    with pytest.raises(ValueError):
+        mcnemar_exact(["a", "b"], ["a"], ["a", "b"])
+    with pytest.raises(ValueError):
+        mcnemar_exact([], [], [])
 
 
 def test_accuracy_coverage_curve():
