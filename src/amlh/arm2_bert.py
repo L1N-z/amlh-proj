@@ -58,7 +58,7 @@ def make_loader(
     Shuffling is seeded via an explicit Generator rather than global RNG state, so
     each call is independently reproducible."""
     dataset = TensorDataset(
-        encodings["input_ids"], encodings["attention_mask"], torch.tensor(labels)
+        encodings["input_ids"], encodings["attention_mask"], torch.tensor(labels, dtype=torch.long)
     )
     if shuffle:
         if seed is None:
@@ -140,6 +140,7 @@ def train_model(
     seed: int,
     model=None,
     tokeniser=None,
+    on_epoch_end: Callable[[dict], None] | None = None,
 ) -> tuple[dict, pd.DataFrame, dict[int, list[list[str]]]]:
     """Manual AdamW training loop. Returns (best_state_dict, history_df,
     ranked_by_epoch) where history_df has one row per epoch: epoch, train_loss,
@@ -154,7 +155,15 @@ def train_model(
 
     `model`/`tokeniser` are a test-only injection seam: pass pre-built objects to
     skip `from_pretrained` (e.g. a tiny random-init model, no network). Production
-    and notebook calls omit them."""
+    and notebook calls omit them.
+
+    `on_epoch_end`, if given, is called after each epoch's row is appended, with
+    that row's dict (epoch, train_loss, val_loss, val_accuracy) — a print-free
+    module stays print-free; the notebook supplies the printer."""
+    missing = (set(fit_df["disease"]) | set(val_df["disease"])) - set(label_to_id)
+    if missing:
+        raise ValueError(f"{len(missing)} labels absent from label_to_id: {sorted(missing)[:5]}")
+
     config.set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -190,9 +199,10 @@ def train_model(
             model, tokeniser, val_df["question"].tolist(), id_to_label, max_length, batch_size, device
         )
         val_accuracy = score_ranked(ranked, val_gold)["accuracy"]
-        rows.append(
-            {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss, "val_accuracy": val_accuracy}
-        )
+        row = {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss, "val_accuracy": val_accuracy}
+        rows.append(row)
+        if on_epoch_end is not None:
+            on_epoch_end(row)
         ranked_by_epoch[epoch] = ranked
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
@@ -226,6 +236,7 @@ def run_model_ablation(
     epochs: int,
     max_length: int,
     seed: int,
+    on_epoch_end: Callable[[str, dict], None] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, dict[int, list[list[str]]]]]:
     """Trains each encoder in `model_names` with identical hyperparameters via
     `train_model` (no duplicated training logic), re-seeding before each run.
@@ -238,6 +249,9 @@ def run_model_ablation(
     ranked_by_epoch_by_model = {}
     for model_name in model_names:
         config.set_seed(seed)
+        epoch_callback = (
+            None if on_epoch_end is None else (lambda row, model_name=model_name: on_epoch_end(model_name, row))
+        )
         (best_state, history_df, ranked_by_epoch), wall_clock_s, peak_memory_mb = measure_run(
             train_model,
             fit_df,
@@ -249,6 +263,7 @@ def run_model_ablation(
             epochs,
             max_length,
             seed,
+            on_epoch_end=epoch_callback,
         )
         best_row = history_df.loc[history_df["val_accuracy"].idxmax()]
         histories[model_name] = history_df

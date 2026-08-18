@@ -106,6 +106,8 @@ def test_make_loader_no_workers(tiny_tokeniser):
     encodings = ab.tokenise(["hello", "world", "cough", "fever"], tiny_tokeniser, max_length=8)
     loader = ab.make_loader(encodings, [0, 1, 2, 3], batch_size=2, shuffle=False)
     assert loader.num_workers == 0
+    labels_tensor = next(iter(loader))[2]
+    assert labels_tensor.dtype == torch.long
 
 
 def test_make_loader_shuffle_seeded_reproducible(tiny_tokeniser):
@@ -184,6 +186,48 @@ def test_train_model_captures_predictions_matching_history(
         assert recomputed == pytest.approx(logged)
 
 
+def test_train_model_calls_on_epoch_end_per_epoch(tiny_bert, tiny_tokeniser, label_to_id, tiny_frame):
+    fit_df, val_df = tiny_frame
+    calls = []
+    ab.train_model(
+        fit_df,
+        val_df,
+        label_to_id,
+        model_name="unused-with-injected-model",
+        lr=1e-4,
+        batch_size=2,
+        epochs=2,
+        max_length=8,
+        seed=44,
+        model=tiny_bert,
+        tokeniser=tiny_tokeniser,
+        on_epoch_end=calls.append,
+    )
+    assert len(calls) == 2
+    for row in calls:
+        assert {"epoch", "train_loss", "val_loss", "val_accuracy"} <= set(row)
+
+
+def test_train_model_rejects_unmapped_label(tiny_bert, tiny_tokeniser, label_to_id, tiny_frame):
+    fit_df, val_df = tiny_frame
+    val_df = val_df.copy()
+    val_df.loc[0, "disease"] = "unmapped_disease"
+    with pytest.raises(ValueError):
+        ab.train_model(
+            fit_df,
+            val_df,
+            label_to_id,
+            model_name="unused-with-injected-model",
+            lr=1e-4,
+            batch_size=2,
+            epochs=1,
+            max_length=8,
+            seed=44,
+            model=tiny_bert,
+            tokeniser=tiny_tokeniser,
+        )
+
+
 def test_predict_ranked_shape_and_labels(tiny_bert, tiny_tokeniser, label_to_id):
     id_to_label = {i: label for label, i in label_to_id.items()}
     device = torch.device("cpu")
@@ -217,7 +261,7 @@ def test_run_model_ablation_reuses_train_model(monkeypatch, label_to_id, tiny_fr
     fit_df, val_df = tiny_frame
     calls = []
 
-    def stub_train_model(fit_df, val_df, label_to_id, model_name, lr, batch_size, epochs, max_length, seed):
+    def stub_train_model(fit_df, val_df, label_to_id, model_name, lr, batch_size, epochs, max_length, seed, on_epoch_end=None):
         calls.append(
             {"model_name": model_name, "lr": lr, "batch_size": batch_size, "epochs": epochs, "seed": seed}
         )
