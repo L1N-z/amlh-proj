@@ -1,9 +1,22 @@
+from dataclasses import dataclass
+
 import pandas as pd
 import pytest
 
 from amlh import arm1_experiments as ae
 
 VEC_KWARGS = {"ngram_range": (1, 1), "sublinear_tf": False, "min_df": 1, "stop_words": None}
+
+
+@dataclass(frozen=True)
+class _FrozenHP:
+    ngram_range: tuple = (1, 1)
+    sublinear_tf: bool = False
+    min_df: int = 1
+    stop_words: object = None
+    index_variant: str = "Q"
+    index_scheme: str = "class_blob"
+    k_neighbors: int = 1
 
 
 @pytest.fixture
@@ -100,3 +113,44 @@ def test_run_supervised_baselines_smoke(tiny_split):
     fit_small, val_small = tiny_split
     df = ae.run_supervised_baselines(fit_small, val_small, VEC_KWARGS)
     assert list(df["model"]) == ["svc", "logreg", "random_forest"]
+
+
+def test_frozen_ranking_depth_none_matches_grid(tiny_split):
+    fit_small, val_small = tiny_split
+    hp = _FrozenHP()
+    ranked, top_sim = ae.frozen_ranking(fit_small, val_small, hp)
+    grid = ae.run_vectoriser_grid(
+        fit_small, val_small, hp.index_variant, [hp.ngram_range], [hp.sublinear_tf], [hp.min_df],
+        [hp.stop_words], [hp.k_neighbors],
+    )
+    assert grid.iloc[0]["accuracy"] == sum(
+        r[0] == g for r, g in zip(ranked, val_small["disease"])
+    ) / len(val_small)
+    assert len(top_sim) == len(val_small)
+
+
+def test_build_val_predictions_schema_and_top1_matches_frozen(tiny_split):
+    fit_small, val_small = tiny_split
+    hp = _FrozenHP()
+    depth = 4
+    ranked_frozen, _ = ae.frozen_ranking(fit_small, val_small, hp)
+    preds = ae.build_val_predictions(fit_small, val_small, hp, depth=depth)
+
+    assert len(preds) == len(val_small)
+    expected_cols = {"question", "gold", "pred", "top_sim", *(f"top_{i}" for i in range(1, depth + 1))}
+    assert expected_cols <= set(preds.columns)
+    assert preds["pred"].tolist() == [r[0] for r in ranked_frozen]
+    assert preds["question"].tolist() == val_small["question"].tolist()
+    assert preds["gold"].tolist() == val_small["disease"].tolist()
+
+
+def test_shortlist_ceiling_monotonic_and_matches_accuracy_at_k(tiny_split):
+    fit_small, val_small = tiny_split
+    hp = _FrozenHP()
+    preds = ae.build_val_predictions(fit_small, val_small, hp, depth=4)
+    ceiling = ae.shortlist_ceiling(preds, [1, 2, 4])
+
+    assert list(ceiling["k"]) == [1, 2, 4]
+    assert ceiling["accuracy"].is_monotonic_increasing
+    top1_acc = (preds["pred"] == val_small["disease"].reset_index(drop=True)).mean()
+    assert ceiling.loc[ceiling["k"] == 1, "accuracy"].item() == pytest.approx(top1_acc)

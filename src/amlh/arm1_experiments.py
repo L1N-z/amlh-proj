@@ -11,7 +11,7 @@ from itertools import product
 import pandas as pd
 
 from amlh import arm1_tfidf, data, features
-from amlh.evaluate import score_ranked
+from amlh.evaluate import accuracy_at_k, score_ranked
 
 
 def _score_row(ranked: list[list[str]], gold: list[str], extra: dict) -> dict:
@@ -179,6 +179,58 @@ def run_split_robustness(
                 _score_row(ranked, gold, {"config_rank": rank, "seed": seed, **vec_kwargs, "k": cfg["k"]})
             )
     return pd.DataFrame(rows)
+
+
+def frozen_ranking(
+    fit_df: pd.DataFrame, val_df: pd.DataFrame, hp, depth: int | None = None
+) -> tuple[list[list[str]], list[float]]:
+    """Run `arm1_tfidf.knn_rank` at the frozen Arm 1 hyperparameters in `hp`
+    (normally `config.HYPERPARAMETERS`) over `val_df`. `depth=None` reproduces
+    exactly the ranking every grid in this module already reports; passing a
+    `depth` extends it for cross-arm comparability without touching the vote
+    that produces rank 1 — see `arm1_tfidf.knn_rank`. The single place that
+    reads `hp`'s vectoriser/index/k fields, so the frozen-path comparison and
+    the depth-extended path can never read them differently."""
+    vec_kwargs = {
+        "ngram_range": hp.ngram_range,
+        "sublinear_tf": hp.sublinear_tf,
+        "min_df": hp.min_df,
+        "stop_words": hp.stop_words,
+    }
+    build_fn = features.build_index if hp.index_scheme == "class_blob" else features.build_index_additive
+    index_texts, index_labels = build_fn(fit_df, hp.index_variant)
+    return arm1_tfidf.knn_rank(
+        index_texts, index_labels, val_df["question"].tolist(), hp.k_neighbors, vec_kwargs, depth=depth
+    )
+
+
+def build_val_predictions(fit_df: pd.DataFrame, val_df: pd.DataFrame, hp, depth: int) -> pd.DataFrame:
+    """Per-item Arm 1 validation predictions at the frozen hyperparameters in
+    `hp`, ranked `depth` labels deep, aligned to `val_df`'s row order. No
+    aggregate Arm 1 grid records per-item output, so McNemar against Arm 2 and
+    the error analysis (most-confused pairs, family-internal errors, worked
+    examples) have nothing to read without this. Columns short of `depth`
+    ranked labels are left empty rather than padded with a placebo label."""
+    ranked, top_sim = frozen_ranking(fit_df, val_df, hp, depth=depth)
+    rows = []
+    for question, gold, r, sim in zip(val_df["question"], val_df["disease"], ranked, top_sim):
+        row = {"question": question, "gold": gold, "pred": r[0]}
+        for i in range(depth):
+            row[f"top_{i + 1}"] = r[i] if i < len(r) else None
+        row["top_sim"] = sim
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def shortlist_ceiling(predictions_df: pd.DataFrame, ks: list[int]) -> pd.DataFrame:
+    """acc@k, for each k in `ks`, over a `build_val_predictions` frame's
+    top_1..top_N columns — the bound Arm 3's shortlist-then-select design is
+    interpreted against. Reuses `evaluate.accuracy_at_k` rather than scoring
+    top-k membership a second way."""
+    top_cols = [f"top_{i}" for i in range(1, max(ks) + 1)]
+    ranked = [[lab for lab in row if isinstance(lab, str)] for row in predictions_df[top_cols].values.tolist()]
+    gold = predictions_df["gold"].tolist()
+    return pd.DataFrame({"k": ks, "accuracy": [accuracy_at_k(ranked, gold, k) for k in ks]})
 
 
 def run_supervised_baselines(fit_df: pd.DataFrame, val_df: pd.DataFrame, vec_kwargs: dict) -> pd.DataFrame:
