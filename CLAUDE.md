@@ -71,6 +71,15 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
    instrument corrected to McNemar. Unlike the Arm 1 tie-break above, it was **not** pre-registered
    before the numbers were seen.
 
+    **Arm 3 prompt-condition tie-break (pre-registered 2026-08-19, before any condition was run).**
+    The three prompt conditions are compared pairwise on the standard hold-out with **McNemar's
+    exact test**, over the same 200 validation items. If no condition separates from the others at
+    p ≥ 0.05, the comparison is **reported as unresolved** and `zero_shot` is selected on the
+    declared prior of the simplest prompt — fewest tokens, no exemplar-selection confound, lowest
+    inference cost. **This can and does retain a lower-scoring condition** — that is the intended
+    behaviour of a prior, and the report must say so rather than imply accuracy chose it. Unlike
+    the Arm 2 encoder rule, this one was pre-registered before the numbers were seen.
+
    Epoch/checkpoint selection *within* each encoder is unchanged: standard hold-out,
    within-1-SE-prefer-fewest-epochs.
 3. **Never state a number that was not printed by code you just ran.** No estimated, recalled or

@@ -87,10 +87,14 @@ class Hyperparameters:
     batch_size: int | None = 16
     num_epochs: int | None = 15
     # Arm 3 — LLM shortlist + prompting
-    shortlist_k: int | None = None
-    llm_temperature: float | None = None
-    prompt_mode: str | None = None  # e.g. zero_shot / few_shot / cot
+    # Frozen from notebooks/04_arm3_llm.ipynb after the prompt-budget check and condition
+    # comparison. The selection rule is pre-registered in CLAUDE.md, and the notebook must print
+    # the chosen values before they are copied here.
+    shortlist_k: int | None = 20
+    llm_temperature: float | None = 0.0
+    prompt_mode: str | None = None  # zero_shot / few_shot / cot — frozen after McNemar selection
     n_shots: int | None = None
+    arm3_model_name: str | None = "google/flan-t5-large"
 
 
 HYPERPARAMETERS = Hyperparameters()
