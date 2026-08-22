@@ -1,0 +1,3 @@
+model_name,best_epoch,val_accuracy,val_loss,wall_clock_s,peak_memory_mb
+emilyalsentzer/Bio_ClinicalBERT,22,0.87,0.807319666147232,1971.3856901959998,2201.6
+bert-base-uncased,22,0.885,0.7546466010808944,2026.7007307559998,2227.888128

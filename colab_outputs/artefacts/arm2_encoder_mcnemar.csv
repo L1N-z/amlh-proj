@@ -1,0 +1,2 @@
+system_a,system_b,n,accuracy_a,accuracy_b,accuracy_diff,only_a_correct,only_b_correct,n_discordant,p_value
+emilyalsentzer/Bio_ClinicalBERT,bert-base-uncased,200,0.85,0.875,-0.025,6,11,17,0.332305908203125
