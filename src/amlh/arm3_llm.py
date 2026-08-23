@@ -2,8 +2,31 @@
 
 Frozen Arm 1 retrieval produces a shortlist of candidate labels; Arm 3 then
 formats that shortlist into one of three prompt conditions, sends the prompt to
-a seq2seq LLM, parses the model's answer back to a shortlist index, and falls
-back to the Arm 1 top-1 label when parsing fails.
+an LLM, matches the model's answer back to a shortlist label, and falls back to
+the Arm 1 top-1 label when no candidate can be matched.
+
+The design deliberately mirrors the NLP4 practical
+(``reference/NLP4_patientQ&A-solution.ipynb``), whose Task 4 is this exact
+problem — prompt an LLM to pick the most relevant diagnosis from a candidate
+list. Specifically:
+
+* the generator is loaded and called through a ``pipe(prompt, max_new_tokens=...)``
+  closure with the practical's signature (its ``cell-7``);
+* prompts are chat messages, ``[{"role": ..., "content": ...}]``, with the
+  practical's system persona and its "Respond with only the diagnosis name."
+  instruction (its ``cell-27``);
+* the reply is matched back by *name*, not by a candidate number.
+
+Two deliberate deviations, both to be stated in the report:
+
+1. The practical falls back to ``random.choice(unique_diagnoses)`` when the
+   generated name is not in the candidate list. Arm 3 falls back to the Arm 1
+   top-1 label instead — a random label would inject noise into a measured
+   accuracy for no benefit, and the top-1 is the prediction the system would
+   have made without the LLM, which makes the fallback the honest null action.
+2. ``flatten_messages`` joins roles with a blank line where the practical's API
+   branch uses ``"".join``; the practical's contents happen to abut cleanly and
+   ours do not.
 
 All heavy lifting stays here so the notebook can remain a thin orchestration
 layer. Tests can inject a fake generator and never download a model.
@@ -23,6 +46,22 @@ from amlh.config import HYPERPARAMETERS, SEED
 
 PromptMode = Literal["zero_shot", "few_shot", "cot"]
 
+# Verbatim from the practical's diagnosis-selection prompt (cell-27).
+SYSTEM_PROMPT = "You are a helpful assistant trained to identify relevant medical question topics."
+
+# Per-condition closing instruction. `cot` carries no placeholder token for the
+# model to copy: the first Arm 3 run asked for "'Final answer: N'" and
+# Flan-T5-large echoed the literal letter N on 93/200 items, so 46.5% of that
+# condition was fallback rather than model choice.
+_CLOSERS: dict[str, str] = {
+    "zero_shot": "Respond with only the diagnosis name.",
+    "few_shot": "Respond with only the diagnosis name.",
+    "cot": (
+        "Think step by step about which diagnosis the question is asking about, "
+        "then end your reply with 'Final answer:' followed by the diagnosis name."
+    ),
+}
+
 
 @dataclass(frozen=True)
 class PromptExample:
@@ -36,7 +75,11 @@ def prettify_label(label: str) -> str:
 
 
 def selected_model_name(hp=HYPERPARAMETERS) -> str:
-    return hp.arm3_model_name or "google/flan-t5-large"
+    return hp.arm3_model_name or "microsoft/MediPhi-Guidelines"
+
+
+def secondary_model_name(hp=HYPERPARAMETERS) -> str:
+    return hp.arm3_secondary_model_name or "google/flan-t5-large"
 
 
 def shortlist_k(hp=HYPERPARAMETERS) -> int:
@@ -57,13 +100,15 @@ def llm_temperature(hp=HYPERPARAMETERS) -> float:
     return hp.llm_temperature
 
 
-def vec_kwargs(hp=HYPERPARAMETERS) -> dict:
-    return {
-        "ngram_range": hp.ngram_range,
-        "sublinear_tf": hp.sublinear_tf,
-        "min_df": hp.min_df,
-        "stop_words": hp.stop_words,
-    }
+def max_new_tokens_for(mode: PromptMode, hp=HYPERPARAMETERS) -> int:
+    """Generation budget for `mode`.
+
+    `cot` needs room for reasoning *and* a final answer; the other two need only
+    a diagnosis name, for which the practical budgets 20 tokens.
+    """
+    if mode == "cot":
+        return hp.arm3_cot_max_new_tokens or 128
+    return hp.arm3_max_new_tokens or 20
 
 
 def build_shortlist_ranking(
@@ -75,9 +120,41 @@ def build_shortlist_ranking(
     """Frozen Arm 1 shortlist ranking for Arm 3.
 
     The shortlist is produced by the frozen Arm 1 retrieval configuration so
-    Arm 3 never re-tunes the retriever it consumes.
+    Arm 3 never re-tunes the retriever it consumes. `features.build_index`
+    raises if the NHS documents backing the frozen QLAD variant are absent, so
+    this cannot quietly return a lower-variant ranking.
     """
     return arm1_experiments.frozen_ranking(fit_df, val_df, hp, depth=depth)
+
+
+def assert_reproduces_arm1(
+    shortlist_rankings: list[list[str]], arm1_predictions: pd.DataFrame
+) -> dict:
+    """Check the shortlist's top-1 against Arm 1's persisted per-item predictions.
+
+    The first Arm 3 Colab run built its shortlists from variant QLA, not the
+    frozen QLAD, because the NHS document corpus was never uploaded to the
+    runtime. Nothing in the pipeline noticed. This is the assertion that would
+    have: rank 1 of the shortlist must be, item for item, the label in
+    `artefacts/arm1_val_predictions.csv`.
+    """
+    top1 = [ranking[0] for ranking in shortlist_rankings]
+    expected = arm1_predictions["top_1"].tolist()
+    if len(top1) != len(expected):
+        raise ValueError(
+            f"shortlist has {len(top1)} items but arm1_val_predictions.csv has {len(expected)}; "
+            "these must be the same validation split in the same order"
+        )
+    mismatches = [i for i, (a, b) in enumerate(zip(top1, expected)) if a != b]
+    if mismatches:
+        raise ValueError(
+            f"shortlist top-1 disagrees with Arm 1 on {len(mismatches)}/{len(expected)} items "
+            f"(first at index {mismatches[0]}: got {top1[mismatches[0]]!r}, "
+            f"expected {expected[mismatches[0]]!r}). The frozen retrieval configuration is not "
+            "the one that produced arm1_val_predictions.csv — check that data/db_nhs_qa_classification "
+            "is present and that config.py has not drifted."
+        )
+    return {"n": len(top1), "top1_matches_arm1": True}
 
 
 def build_examples(fit_df: pd.DataFrame, n: int, seed: int = SEED) -> list[PromptExample]:
@@ -88,8 +165,9 @@ def build_examples(fit_df: pd.DataFrame, n: int, seed: int = SEED) -> list[Promp
     return [PromptExample(question=row.question, label=row.disease) for row in sample.itertuples()]
 
 
-def candidate_lines(shortlist: list[str]) -> list[str]:
-    return [f"{i + 1}. {prettify_label(label)}" for i, label in enumerate(shortlist)]
+def candidate_names(shortlist: list[str]) -> str:
+    """Candidate labels as the practical renders them: a comma-joined name list."""
+    return ", ".join(prettify_label(label) for label in shortlist)
 
 
 def build_prompt(
@@ -97,34 +175,49 @@ def build_prompt(
     shortlist: list[str],
     mode: PromptMode,
     examples: list[PromptExample] | None = None,
-) -> str:
-    """Build one inspectable prompt string for the requested condition."""
-    examples = examples or []
-    lines: list[str] = []
-    lines.append("You are classifying a patient question into one of the candidate disease labels.")
-    lines.append("Choose the single best candidate by number.")
-    if mode == "zero_shot":
-        lines.append("Respond with only the candidate number.")
-    elif mode == "few_shot":
-        lines.append("Use the worked examples first, then answer with only the candidate number.")
-    elif mode == "cot":
-        lines.append("Think briefly, then give a short final answer as 'Final answer: N'.")
-    else:
+) -> list[dict[str, str]]:
+    """Build one chat-message prompt for the requested condition.
+
+    Follows the practical's diagnosis-selection prompt, with its candidate list
+    narrowed from every disease to the Arm 1 shortlist.
+    """
+    if mode not in _CLOSERS:
         raise ValueError(f"unknown prompt mode: {mode!r}")
+    examples = examples or []
+
+    parts = [
+        "Given the question below, which one of the following diagnoses is most relevant?",
+        "",
+        "Diagnoses:",
+        candidate_names(shortlist),
+        "",
+    ]
 
     if examples:
-        lines.append("")
-        lines.append("Worked examples:")
-        for i, example in enumerate(examples, start=1):
-            lines.append(f"Example {i}:")
-            lines.append(f"Question: {example.question}")
-            lines.append(f"Correct label: {prettify_label(example.label)}")
-            lines.append("")
+        parts.append("Worked examples:")
+        for example in examples:
+            parts.append(f"Question:\n{example.question}")
+            parts.append(f"Diagnosis:\n{prettify_label(example.label)}")
+            parts.append("")
 
-    lines.append(f"Question: {question}")
-    lines.append("Candidates:")
-    lines.extend(candidate_lines(shortlist))
-    return "\n".join(lines).strip()
+    parts.append(f"Question:\n{question}")
+    parts.append("")
+    parts.append(_CLOSERS[mode])
+
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": "\n".join(parts).strip()},
+    ]
+
+
+def flatten_messages(messages: list[dict[str, str]]) -> str:
+    """Chat messages as one string, for tokenisers without a chat template.
+
+    The practical's API branch does ``''.join(item['content'] for item in prompt)``;
+    this joins on a blank line instead so the persona does not run into the
+    instruction mid-sentence.
+    """
+    return "\n\n".join(message["content"] for message in messages)
 
 
 def build_prompts_for_condition(
@@ -132,17 +225,18 @@ def build_prompts_for_condition(
     shortlist_rankings: list[list[str]],
     mode: PromptMode,
     examples: list[PromptExample] | None = None,
-) -> list[str]:
-    """Return one prompt per validation question, aligned to `val_df`."""
+) -> list[list[dict[str, str]]]:
+    """Return one chat prompt per validation question, aligned to `val_df`."""
     prompts = []
     for question, shortlist in zip(val_df["question"].tolist(), shortlist_rankings):
         prompts.append(build_prompt(question, shortlist, mode, examples=examples))
     return prompts
 
 
-def prompt_token_lengths(prompts: list[str], tokeniser, max_length: int = 512) -> dict:
+def prompt_token_lengths(prompts: list, tokeniser, max_length: int = 512) -> dict:
     """Measure prompt lengths and the truncation rate at the model encoder limit."""
-    lengths = [len(tokeniser(prompt, truncation=False)["input_ids"]) for prompt in prompts]
+    texts = [flatten_messages(p) if isinstance(p, list) else p for p in prompts]
+    lengths = [len(tokeniser(text, truncation=False)["input_ids"]) for text in texts]
     trunc_rate = sum(length > max_length for length in lengths) / len(lengths) if lengths else 0.0
     series = pd.Series(lengths, dtype="int64") if lengths else pd.Series(dtype="int64")
     return {
@@ -157,68 +251,130 @@ def prompt_token_lengths(prompts: list[str], tokeniser, max_length: int = 512) -
     }
 
 
-_INDEX_RE = re.compile(r"(?:final\s*answer\s*[:=]?\s*)?(\d+)", re.IGNORECASE)
+# Matched per line (no DOTALL) so the *last* marker in a chain of reasoning wins.
+_FINAL_ANSWER_RE = re.compile(r"final\s*answer\s*[:\-]?\s*(.*)", re.IGNORECASE)
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
 
-def parse_candidate_index(raw_output: str, n_candidates: int) -> int | None:
-    """Parse a 1-based candidate index from the model output.
+def _normalise(text: str) -> str:
+    """Casefold and reduce to single-spaced alphanumerics for name matching."""
+    return _NON_ALNUM_RE.sub(" ", text.lower()).strip()
 
-    The parser is intentionally strict: if the output cannot be mapped to a
-    valid shortlist position, the caller falls back to Arm 1's top-1 label.
+
+def parse_diagnosis_name(raw_output: str, shortlist: list[str]) -> str | None:
+    """Match a generated diagnosis name back to a shortlist label.
+
+    Exact normalised equality first, as in the practical's ``in unique_diagnoses``
+    membership test. Instruction-tuned models often wrap the name in a sentence,
+    so a containment pass follows; the longest matching candidate wins, otherwise
+    "leukaemia" would shadow "acute myeloid leukaemia" on a shortlist holding both.
+    Returns None when nothing matches, and the caller falls back to Arm 1's top-1.
     """
     if not raw_output:
         return None
-    match = _INDEX_RE.search(raw_output.strip())
-    if match is None:
+    text = raw_output.strip()
+    markers = list(_FINAL_ANSWER_RE.finditer(text))
+    if markers:
+        text = markers[-1].group(1)
+
+    normalised_output = _normalise(text)
+    if not normalised_output:
         return None
-    idx = int(match.group(1))
-    if 1 <= idx <= n_candidates:
-        return idx
-    return None
+
+    candidates = [(label, _normalise(prettify_label(label))) for label in shortlist]
+    for label, normalised_label in candidates:
+        if normalised_label == normalised_output:
+            return label
+
+    best_label, best_length = None, 0
+    for label, normalised_label in candidates:
+        if normalised_label and normalised_label in normalised_output and len(normalised_label) > best_length:
+            best_label, best_length = label, len(normalised_label)
+    return best_label
 
 
-def parse_model_output(raw_output: str, shortlist: list[str]) -> tuple[str, bool, int | None]:
-    """Map a raw generation to a shortlist label, or fall back to top-1."""
-    parsed_index = parse_candidate_index(raw_output, len(shortlist))
-    if parsed_index is None:
-        return shortlist[0], True, None
-    return shortlist[parsed_index - 1], False, parsed_index
+def parse_model_output(raw_output: str, shortlist: list[str]) -> tuple[str, bool, str | None, int | None]:
+    """Map a raw generation to a shortlist label, or fall back to top-1.
+
+    Returns ``(label, fallback_fired, matched_label, matched_rank)``, where
+    `matched_rank` is the 1-based shortlist position the model moved to — the
+    quantity that says whether the LLM is reordering the retriever at all.
+    """
+    matched = parse_diagnosis_name(raw_output, shortlist)
+    if matched is None:
+        return shortlist[0], True, None, None
+    return matched, False, matched, shortlist.index(matched) + 1
 
 
-def load_generator(model_name: str | None = None, device=None):
-    """Load Flan-T5 in float32 for greedy seq2seq generation."""
+def load_generator(model_name: str | None = None, device=None, hp=HYPERPARAMETERS):
+    """Load an Arm 3 generator and return ``(tokenizer, model, pipe)``.
+
+    `pipe` has the practical's signature and return shape
+    (``[{"generated_text": ...}]``) so the notebook's call site reads the same.
+    Encoder-decoder checkpoints (Flan-T5) have no chat template, so their
+    prompts are flattened to text; causal checkpoints (MediPhi) go through
+    ``apply_chat_template`` exactly as the practical does.
+    """
     import torch
-    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
-    name = model_name or selected_model_name()
-    tokeniser = AutoTokenizer.from_pretrained(name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(name, torch_dtype=torch.float32)
-    if device is not None:
-        model.to(device)
+    name = model_name or selected_model_name(hp)
+    config = AutoConfig.from_pretrained(name)
+    is_encoder_decoder = bool(getattr(config, "is_encoder_decoder", False))
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    tokenizer = AutoTokenizer.from_pretrained(name)
+    dtype = torch.float16 if str(device).startswith("cuda") else torch.float32
+    loader = AutoModelForSeq2SeqLM if is_encoder_decoder else AutoModelForCausalLM
+    model = loader.from_pretrained(name, dtype=dtype).to(device)
     model.eval()
-    return tokeniser, model
 
+    def pipe(
+        prompt,
+        max_new_tokens=100,  # maximum number of new tokens to generate (excluding the input prompt)
+        temperature=0.0,  # controls randomness, with do_sample=False generation is deterministic
+        return_full_text=False,  # if True, return both the prompt and generated text
+        do_sample=False,  # if False, use greedy decoding
+        clean_up_tokenization_spaces=False,  # whether to remove tokenisation artefacts
+    ):
+        # prompt is expected to be [{"role": "system", ...}, {"role": "user", ...}]
+        if is_encoder_decoder:
+            inputs = tokenizer(flatten_messages(prompt), return_tensors="pt", truncation=True)
+        else:
+            inputs = tokenizer.apply_chat_template(
+                prompt,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
+                return_dict=True,
+            )
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
-def generate_raw_output(
-    prompt: str,
-    tokeniser,
-    model,
-    device,
-    max_new_tokens: int = 8,
-) -> str:
-    """Greedy seq2seq generation for one prompt."""
-    import torch
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=do_sample,
+            )
 
-    encoded = tokeniser(prompt, return_tensors="pt", truncation=True)
-    encoded = {k: v.to(device) for k, v in encoded.items()}
-    with torch.no_grad():
-        output_ids = model.generate(
-            **encoded,
-            do_sample=False,
-            temperature=0.0,
-            max_new_tokens=max_new_tokens,
+        # An encoder-decoder's output holds only the generated tokens; a causal
+        # model's replays the prompt first and has to be sliced off.
+        if is_encoder_decoder or return_full_text:
+            generated_ids = outputs[0]
+        else:
+            generated_ids = outputs[0][inputs["input_ids"].shape[1] :]
+
+        generated_text = tokenizer.decode(
+            generated_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=clean_up_tokenization_spaces,
         )
-    return tokeniser.decode(output_ids[0], skip_special_tokens=True).strip()
+        return [{"generated_text": generated_text.strip()}]
+
+    return tokenizer, model, pipe
 
 
 def run_condition(
@@ -226,50 +382,55 @@ def run_condition(
     val_df: pd.DataFrame,
     hp=HYPERPARAMETERS,
     mode: PromptMode = "zero_shot",
-    tokeniser=None,
-    model=None,
-    device=None,
-    generator: Callable[[str], str] | None = None,
+    pipe: Callable | None = None,
     examples: list[PromptExample] | None = None,
     shortlist_depth: int | None = None,
-) -> tuple[pd.DataFrame, dict, list[str]]:
+    model_name: str | None = None,
+    shortlist_rankings: list[list[str]] | None = None,
+    top_sim: list[float] | None = None,
+) -> tuple[pd.DataFrame, dict, list]:
     """Run one prompt condition over the validation split.
 
-    Returns the per-item frame, a metrics dict, and the prompt strings used.
-    The caller decides whether to persist them.
+    Returns the per-item frame, a metrics dict, and the chat prompts used. The
+    caller decides whether to persist them. Passing `shortlist_rankings` reuses
+    a ranking already built rather than re-running retrieval per condition.
     """
+    if pipe is None:
+        raise ValueError("a `pipe` callable is required — pass load_generator(...)[2] or a fake")
     shortlist_depth = shortlist_depth or shortlist_k(hp)
-    ranked, top_sim = build_shortlist_ranking(fit_df, val_df, hp, depth=shortlist_depth)
-    prompts = build_prompts_for_condition(val_df, ranked, mode, examples=examples)
+    if shortlist_rankings is None:
+        shortlist_rankings, top_sim = build_shortlist_ranking(fit_df, val_df, hp, depth=shortlist_depth)
+    if top_sim is None:
+        top_sim = [float("nan")] * len(shortlist_rankings)
+
+    prompts = build_prompts_for_condition(val_df, shortlist_rankings, mode, examples=examples)
+    budget = max_new_tokens_for(mode, hp)
+    temperature = llm_temperature(hp)
 
     rows = []
     start = time.perf_counter()
     for item_idx, (question, gold, shortlist, prompt, sim) in enumerate(
-        zip(val_df["question"], val_df["disease"], ranked, prompts, top_sim)
+        zip(val_df["question"], val_df["disease"], shortlist_rankings, prompts, top_sim)
     ):
-        if generator is not None:
-            raw_output = generator(prompt)
-        else:
-            if tokeniser is None or model is None or device is None:
-                raise ValueError("tokeniser, model and device are required when generator is not supplied")
-            raw_output = generate_raw_output(prompt, tokeniser, model, device)
-
-        pred, fallback_fired, parsed_index = parse_model_output(raw_output, shortlist)
+        raw_output = pipe(prompt, max_new_tokens=budget, temperature=temperature)[0]["generated_text"]
+        pred, fallback_fired, matched_label, matched_rank = parse_model_output(raw_output, shortlist)
         gold_rank = shortlist.index(gold) + 1 if gold in shortlist else None
         rows.append(
             {
                 "condition": mode,
+                "model_name": model_name or selected_model_name(hp),
                 "item_idx": item_idx,
                 "question": question,
                 "gold": gold,
                 "arm1_pred": shortlist[0],
                 "pred": pred,
-                "parsed_index": parsed_index,
+                "parsed_label": matched_label,
+                "parsed_rank": matched_rank,
                 "fallback_fired": fallback_fired,
                 "gold_rank": gold_rank,
                 "top_sim": sim,
                 "raw_output": raw_output,
-                "prompt": prompt,
+                "prompt": flatten_messages(prompt),
             }
         )
 
@@ -280,17 +441,29 @@ def run_condition(
 
 
 def summarise_condition(pred_df: pd.DataFrame, wall_clock_sec: float) -> dict:
-    """Condition-level summary with accuracy, fallback rate, CI and wall clock."""
+    """Condition-level summary with accuracy, fallback rate, CI and wall clock.
+
+    `arm1_accuracy` is the shortlist's own top-1 on the same items — the
+    baseline the LLM has to beat to have earned its place in the pipeline, and
+    the comparison the first run never recorded.
+    """
     pred = pred_df["pred"].tolist()
     gold = pred_df["gold"].tolist()
+    arm1 = pred_df["arm1_pred"].tolist()
     ci = evaluate.bootstrap_accuracy_ci(pred, gold, seed=SEED)
     accuracy = sum(p == g for p, g in zip(pred, gold)) / len(gold)
-    fallback_rate = float(pred_df["fallback_fired"].mean())
+    arm1_accuracy = sum(p == g for p, g in zip(arm1, gold)) / len(gold)
+    non_fallback = pred_df[~pred_df["fallback_fired"]]
     return {
         "condition": pred_df["condition"].iloc[0] if len(pred_df) else None,
+        "model_name": pred_df["model_name"].iloc[0] if len(pred_df) else None,
         "n": len(pred_df),
         "accuracy": accuracy,
-        "fallback_rate": fallback_rate,
+        "arm1_accuracy": arm1_accuracy,
+        "accuracy_minus_arm1": accuracy - arm1_accuracy,
+        "fallback_rate": float(pred_df["fallback_fired"].mean()),
+        "agreement_with_arm1": float((pred_df["pred"] == pred_df["arm1_pred"]).mean()),
+        "moved_off_rank1_rate": float((non_fallback["parsed_rank"] > 1).mean()) if len(non_fallback) else 0.0,
         "ci_low": ci["ci_low"],
         "ci_high": ci["ci_high"],
         "wall_clock_sec": wall_clock_sec,
@@ -310,11 +483,26 @@ def pairwise_condition_mcnemar(condition_frames: dict[str, pd.DataFrame]) -> pd.
     return pd.DataFrame(rows)
 
 
+def condition_vs_arm1_mcnemar(condition_frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """McNemar of each condition against the Arm 1 top-1 it was handed.
+
+    Paired by construction: the LLM and the retriever answer the same 200 items,
+    and the items where the LLM simply kept rank 1 carry no evidence either way.
+    """
+    rows = []
+    for mode in sorted(condition_frames):
+        frame = condition_frames[mode]
+        result = evaluate.mcnemar_exact(frame["pred"].tolist(), frame["arm1_pred"].tolist(), frame["gold"].tolist())
+        rows.append({"system_a": f"arm3_{mode}", "system_b": "arm1_top1", **result})
+    return pd.DataFrame(rows)
+
+
 def select_prompt_mode(condition_metrics: pd.DataFrame, mcnemar_df: pd.DataFrame) -> tuple[str, bool]:
     """Select the prompt mode, returning (mode, tie_break_fired).
 
     If no condition is significantly better than both others, the unresolved
-    branch keeps `zero_shot` on the declared prior.
+    branch keeps `zero_shot` on the declared prior — the pre-registered rule in
+    CLAUDE.md. This can and does retain a lower-scoring condition.
     """
     wins: dict[str, set[str]] = {mode: set() for mode in condition_metrics["condition"]}
     for row in mcnemar_df.itertuples(index=False):
@@ -331,11 +519,44 @@ def select_prompt_mode(condition_metrics: pd.DataFrame, mcnemar_df: pd.DataFrame
     return "zero_shot", True
 
 
-def build_prompt_table(prompts_by_mode: dict[str, list[str]]) -> str:
+def model_mcnemar(primary_frame: pd.DataFrame, secondary_frame: pd.DataFrame) -> pd.DataFrame:
+    """McNemar of the two Arm 3 generators at the selected prompt condition."""
+    result = evaluate.mcnemar_exact(
+        primary_frame["pred"].tolist(), secondary_frame["pred"].tolist(), primary_frame["gold"].tolist()
+    )
+    return pd.DataFrame(
+        [
+            {
+                "system_a": primary_frame["model_name"].iloc[0],
+                "system_b": secondary_frame["model_name"].iloc[0],
+                **result,
+            }
+        ]
+    )
+
+
+def select_model(model_mcnemar_df: pd.DataFrame, hp=HYPERPARAMETERS) -> tuple[str, bool]:
+    """Select the Arm 3 generator, returning (model_name, tie_break_fired).
+
+    Pre-registered in CLAUDE.md, mirroring the Arm 2 encoder rule: if McNemar
+    does not resolve the pair at p < 0.05 the comparison is reported as
+    unresolved and the in-domain clinical model is kept on the declared prior.
+    This can and does retain the lower-scoring model.
+    """
+    row = model_mcnemar_df.iloc[0]
+    primary = selected_model_name(hp)
+    if row.p_value < 0.05:
+        winner = row.system_a if row.accuracy_a > row.accuracy_b else row.system_b
+        return winner, False
+    return primary, True
+
+
+def build_prompt_table(prompts_by_mode: dict[str, list]) -> str:
     """Concatenate prompt strings for persistence in `arm3_prompts.txt`."""
     sections = []
     for mode, prompts in prompts_by_mode.items():
         sections.append(f"### {mode}")
-        sections.extend(prompts)
+        for prompt in prompts:
+            sections.append(flatten_messages(prompt) if isinstance(prompt, list) else prompt)
         sections.append("")
     return "\n".join(sections).strip() + "\n"

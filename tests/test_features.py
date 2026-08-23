@@ -14,6 +14,7 @@ from amlh.features import (
     doc_coverage,
     lemmatise,
     load_class_doc,
+    require_doc_coverage,
     term_class_coverage,
 )
 
@@ -183,3 +184,30 @@ def test_lemmatise_deterministic_and_length_preserving():
     b = lemmatise(texts)
     assert a == b
     assert len(a) == len(texts)
+
+
+def test_require_doc_coverage_passes_on_the_real_corpus(split):
+    coverage = require_doc_coverage(split.fit.disease.unique())
+    assert coverage["missing"] == []
+
+
+def test_require_doc_coverage_raises_when_documents_are_absent():
+    with pytest.raises(FileNotFoundError, match="no NHS document"):
+        require_doc_coverage(["Bronchitis", "this_disease_does_not_exist"])
+
+
+def test_build_index_refuses_to_silently_drop_a_missing_document_component(split):
+    """The QLAD -> QLA degradation behind the first Arm 3 Colab run.
+
+    An empty NHS_DOCS_DIR used to make `load_class_doc` return "" for every
+    class, and `build_index` then dropped D without complaint.
+    """
+    subset = split.fit.head(50)
+    with patch.object(features, "_filename_index", return_value={}):
+        with pytest.raises(FileNotFoundError, match="no NHS document"):
+            build_index(subset, "QLAD")
+        with pytest.raises(FileNotFoundError, match="no NHS document"):
+            build_index_additive(subset, "QLAD")
+        # A variant that never asked for documents is unaffected.
+        texts, _ = build_index(subset, "QL")
+        assert len(texts) == subset.disease.nunique()

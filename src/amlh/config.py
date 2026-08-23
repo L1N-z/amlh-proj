@@ -90,11 +90,26 @@ class Hyperparameters:
     # Frozen from notebooks/04_arm3_llm.ipynb after the prompt-budget check and condition
     # comparison. The selection rule is pre-registered in CLAUDE.md, and the notebook must print
     # the chosen values before they are copied here.
+    #
+    # arm3_model_name: microsoft/MediPhi-Guidelines is the PRIMARY generator, matching the
+    # NLP4 practical's model, loading code and `pipe()` signature. arm3_secondary_model_name is
+    # the ablation arm. Selection runs in the pre-registered two-stage order recorded in
+    # CLAUDE.md: prompt condition is chosen on the primary model alone, then the model is chosen
+    # at that condition. Neither stage reads a test-set quantity.
+    # arm3_max_new_tokens: 20, the practical's budget for its diagnosis-selection prompt
+    # (reference/NLP4_patientQ&A-solution.ipynb, `pipe(diagnosis_selection_prompt,
+    # max_new_tokens=20)`). Not tuned.
+    # arm3_cot_max_new_tokens: 128. The CoT condition must be able to emit reasoning AND a final
+    # answer; the first run capped every condition at 8 new tokens, which made chain-of-thought
+    # structurally impossible and is one of the two defects that invalidated it.
     shortlist_k: int | None = 20
     llm_temperature: float | None = 0.0
     prompt_mode: str | None = None  # zero_shot / few_shot / cot — frozen after McNemar selection
-    n_shots: int | None = None
-    arm3_model_name: str | None = "google/flan-t5-large"
+    n_shots: int | None = 2
+    arm3_model_name: str | None = "microsoft/MediPhi-Guidelines"
+    arm3_secondary_model_name: str | None = "google/flan-t5-large"
+    arm3_max_new_tokens: int | None = 20
+    arm3_cot_max_new_tokens: int | None = 128
 
 
 HYPERPARAMETERS = Hyperparameters()

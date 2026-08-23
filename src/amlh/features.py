@@ -78,6 +78,28 @@ def doc_coverage(diseases) -> dict:
     }
 
 
+def require_doc_coverage(diseases) -> dict:
+    """Assert every class in `diseases` has an NHS document, or raise.
+
+    A missing document is not a data property to route around: ``load_class_doc``
+    returns "" for it, and both index builders then drop the "D" component for
+    that class without complaint. Run that way on an environment where
+    ``NHS_DOCS_DIR`` was never populated and the frozen QLAD index silently
+    degrades to QLA — which is exactly what happened to the first Arm 3 Colab
+    run (all 200 shortlists reproduced QLA, not the frozen variant). The
+    builders call this whenever the variant contains "D" so the failure is loud
+    and immediate rather than a quiet accuracy drop discovered afterwards.
+    """
+    coverage = doc_coverage(diseases)
+    if coverage["missing"]:
+        raise FileNotFoundError(
+            f"{len(coverage['missing'])}/{coverage['n_total']} classes have no NHS document under "
+            f"{NHS_DOCS_DIR}. A variant containing 'D' cannot be built: the missing classes would "
+            f"silently lose their document component. First missing: {coverage['missing'][:5]}"
+        )
+    return coverage
+
+
 @lru_cache(maxsize=1)
 def _nlp():
     import spacy
@@ -111,6 +133,8 @@ def build_index(fit_df: pd.DataFrame, variant: str) -> tuple[list[str], list[str
     bad = set(variant) - set(_COMPONENTS)
     if bad:
         raise ValueError(f"variant must be subset of {_COMPONENTS}, got unknown chars {bad}")
+    if "D" in variant:
+        require_doc_coverage(fit_df["disease"].unique())
 
     texts: list[str] = []
     labels: list[str] = []
@@ -143,6 +167,8 @@ def build_index_additive(fit_df: pd.DataFrame, variant: str) -> tuple[list[str],
     bad = set(variant) - set(_COMPONENTS)
     if bad:
         raise ValueError(f"variant must be subset of {_COMPONENTS}, got unknown chars {bad}")
+    if "D" in variant:
+        require_doc_coverage(fit_df["disease"].unique())
 
     texts: list[str] = []
     labels: list[str] = []

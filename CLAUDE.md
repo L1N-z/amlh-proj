@@ -80,6 +80,23 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
     behaviour of a prior, and the report must say so rather than imply accuracy chose it. Unlike
     the Arm 2 encoder rule, this one was pre-registered before the numbers were seen.
 
+    **Arm 3 selection order and model tie-break (pre-registered 2026-08-23, before the
+    corrected run was executed).** Arm 3 now compares three prompt conditions on two
+    generators. A 6-cell grid on a 200-item hold-out (SE ≈ 3.5pp) cannot support six-way
+    selection, so the choice is made in two stages, in this order:
+
+    1. **Prompt condition** is chosen on the **primary** generator alone, by the pairwise
+       McNemar rule above (unresolved → `zero_shot`).
+    2. **Model** is chosen at that already-selected condition, by McNemar over the same 200
+       items. If p ≥ 0.05 the comparison is **reported as unresolved** and
+       `microsoft/MediPhi-Guidelines` is kept on the declared prior that an in-domain
+       clinical model is the appropriate default for a clinical task — the same prior, and
+       the same instrument, as the Arm 2 encoder rule. **This can and does retain the
+       lower-scoring model**; the report must say so rather than imply accuracy chose it.
+
+    The remaining cells of the grid are reported for transparency and select nothing.
+    `google/flan-t5-large` is the secondary/ablation generator.
+
    Epoch/checkpoint selection *within* each encoder is unchanged: standard hold-out,
    within-1-SE-prefer-fewest-epochs.
 3. **Never state a number that was not printed by code you just ran.** No estimated, recalled or
@@ -105,6 +122,29 @@ transformers, torch. Do not introduce dependencies the module did not teach (no 
 sentence-transformers, no LangChain) unless asked — the marker expects course-aligned methods.
 
 Target environment: free Google Colab T4. Keep everything within 16 GB GPU memory.
+
+## Colab runs — inputs must be complete or the frozen config is not what ran
+
+`.gitignore` excludes `data/` and all of `artefacts/`, so a Colab clone has **neither**.
+Every input has to arrive through an uploaded zip, built by
+`python scripts/make_arm3_colab_inputs.py` and unzipped at the repo root
+(`!unzip -o arm3_colab_inputs.zip -d .`). The archive names its members explicitly:
+`artefacts/split_fit.csv`, `artefacts/split_val.csv`, `artefacts/arm1_val_predictions.csv`,
+`data/patient_qa_classification_train.csv`, and all 906 `data/db_nhs_qa_classification/*.txt`.
+
+**Incident, 2026-08-23.** The first Arm 3 Colab run uploaded `arm2_colab_inputs.zip`, which
+holds only the two split CSVs. The NHS documents were absent, `load_class_doc` returned `""`
+for all 906 classes, and `features.build_index` dropped the `D` component without
+complaining — so the frozen **QLAD** index silently ran as **QLA**. Confirmed by exact
+reproduction: the run's 200 shortlist top-1 labels and 200 top-sims match QLA at 1.000 and
+QLAD at 0.915/0.000. Every Arm 3 number from that run is off-config and was discarded.
+
+Two guards now make this impossible to repeat, and neither may be removed:
+
+- `features.require_doc_coverage`, called by both index builders whenever the variant
+  contains `D`, raises rather than degrading.
+- `arm3_llm.assert_reproduces_arm1` checks the shortlist's top-1 against
+  `artefacts/arm1_val_predictions.csv` item for item, before any prompt is sent.
 
 ## Dataset facts (verified — do not re-derive or contradict)
 
