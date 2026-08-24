@@ -6,6 +6,17 @@ artefacts/*
 figures/*
 !figures/.gitkeep
 
+# Colab transfer archives. These bundle data/ and artefacts/, both excluded above, so
+# committing one would push the dataset into the repo that 05_results_colab.ipynb clones.
+# They are build outputs — rebuild with scripts/make_*_colab_inputs.py.
+*.zip
+
+# Unzip debris at the repo root: byte-identical duplicates of artefacts/ and data/,
+# created by unzipping a Colab archive one level too high.
+/split_fit.csv
+/split_val.csv
+/patient_qa_classification_train.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

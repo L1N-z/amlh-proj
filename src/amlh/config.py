@@ -102,9 +102,26 @@ class Hyperparameters:
     # arm3_cot_max_new_tokens: 128. The CoT condition must be able to emit reasoning AND a final
     # answer; the first run capped every condition at 8 new tokens, which made chain-of-thought
     # structurally impossible and is one of the two defects that invalidated it.
+    # prompt_mode: the condition comparison is UNRESOLVED, not won. On the primary generator the
+    # three conditions were compared pairwise with McNemar's exact test over the same 200 hold-out
+    # items (artefacts/arm3_condition_mcnemar.csv): every pair returns p >= 0.05, the smallest
+    # being cot vs few_shot at p = 0.5114. No condition dominates, so CLAUDE.md's pre-registered
+    # Arm 3 tie-break fires and `zero_shot` is kept on the declared simplest-prompt prior. This
+    # RETAINS THE LOWER-SCORING CONDITION — zero_shot 0.720 vs few_shot 0.730 — which is the
+    # intended behaviour of a prior, not an accuracy judgement, and the report must say so.
+    # Unlike the Arm 2 encoder rule, this one WAS pre-registered, on 2026-08-19, before any
+    # condition was run.
+    #
+    # arm3_model_name (below): stage 2 of the same pre-registered order, and the one comparison in
+    # this project that a paired test actually RESOLVED. At the selected `zero_shot` condition,
+    # McNemar over the same 200 items (artefacts/arm3_model_mcnemar.csv) gives 37 items only
+    # MediPhi got right, 20 only flan-t5-large got right, 57 discordant, p = 0.0331 < 0.05.
+    # microsoft/MediPhi-Guidelines is therefore selected on MEASURED ACCURACY (0.720 vs 0.635);
+    # the in-domain clinical prior was available but never had to fire. Report it as such — this
+    # is a stronger claim than the Arm 2 encoder outcome, not the same kind of claim.
     shortlist_k: int | None = 20
     llm_temperature: float | None = 0.0
-    prompt_mode: str | None = None  # zero_shot / few_shot / cot — frozen after McNemar selection
+    prompt_mode: str | None = "zero_shot"  # zero_shot / few_shot / cot — frozen after McNemar selection
     n_shots: int | None = 2
     arm3_model_name: str | None = "microsoft/MediPhi-Guidelines"
     arm3_secondary_model_name: str | None = "google/flan-t5-large"

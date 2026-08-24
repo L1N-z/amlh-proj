@@ -1,0 +1,2 @@
+system_a,system_b,n,accuracy_a,accuracy_b,accuracy_diff,only_a_correct,only_b_correct,n_discordant,p_value
+microsoft/MediPhi-Guidelines,google/flan-t5-large,200,0.72,0.635,0.085,37,20,57,0.033143967787505446

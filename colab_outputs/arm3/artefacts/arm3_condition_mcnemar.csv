@@ -1,0 +1,4 @@
+condition_a,condition_b,n,accuracy_a,accuracy_b,accuracy_diff,only_a_correct,only_b_correct,n_discordant,p_value
+cot,few_shot,200,0.705,0.73,-0.025,16,21,37,0.5113757815852296
+cot,zero_shot,200,0.705,0.72,-0.015,18,21,39,0.7492586247608415
+few_shot,zero_shot,200,0.73,0.72,0.01,11,9,20,0.8238029479980469

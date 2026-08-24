@@ -1,0 +1,4 @@
+condition,min_tokens,median_tokens,mean_tokens,p95_tokens,max_tokens,truncation_rate_512
+zero_shot,144,214.0,228.175,345.39999999999986,372,0.0
+few_shot,209,279.0,293.175,410.39999999999986,437,0.0
+cot,166,236.0,250.175,367.39999999999986,394,0.0

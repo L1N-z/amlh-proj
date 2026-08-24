@@ -97,6 +97,52 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
     The remaining cells of the grid are reported for transparency and select nothing.
     `google/flan-t5-large` is the secondary/ablation generator.
 
+    **Decision recorded 2026-08-23** (from the corrected Colab run; frozen in `config.py`).
+    Both guards held: the run's splits are byte-identical to the canonical ones and
+    `arm1_accuracy` reads 0.850 on every row, so the QLAD index was the frozen one.
+
+    - **`prompt_mode = "zero_shot"`** — UNRESOLVED, not won. All three pairwise McNemar tests on
+      the primary generator return p ≥ 0.05 (smallest: cot vs few_shot, p = 0.5114), so the
+      pre-registered tie-break fires and the simplest-prompt prior is kept. This **retains the
+      lower-scoring condition** (zero_shot 0.720 vs few_shot 0.730).
+    - **`arm3_model_name = "microsoft/MediPhi-Guidelines"`** — RESOLVED on measured accuracy.
+      McNemar at the selected condition: 37 / 20 discordant, p = 0.0331 < 0.05, accuracy 0.720 vs
+      0.635. The clinical prior never had to fire. Do not describe this as a tie-break outcome.
+
+    **Arm 3 headline result — Arm 3 loses to the Arm 1 shortlist it was handed.** 0.720 vs 0.850,
+    McNemar p = 2.4e-05 (6 rescues, 32 breakages). Mechanism, from `arm3_val_predictions.csv`:
+    of 200 items the LLM keeps rank 1 on 118 (0.966, identical to Arm 1 on those items), falls
+    back on 32 (0.750, inert by construction — the fallback returns Arm 1's top-1), and actively
+    re-ranks 50, scoring 0.120 where Arm 1 scored 0.640 on those same items. **All 32 losses come
+    from active re-ranks; none from the fallback.** Intervention precision is 6/50.
+
+    The 16% fallback rate is **not** a parser defect — checked, and 0 of 32 fallback outputs match
+    any of the 906 labels, so they are free-text hallucinations and `parse_diagnosis_name` is
+    correct. Do not retune the parser post-hoc; report the rate as a finding.
+
+## Test-run scope (decided 2026-08-23, before `05_results.ipynb` was written)
+
+All three arms generate test predictions in `05_results.ipynb`, so the report can give the
+per-method error analysis the brief asks for. **No "final deployed system" is selected.** The
+brief asks for a comparison of algorithms, not the nomination of a winner, so every arm's test
+accuracy is reported side by side and no post-hoc selection rule is invented to break the
+Arm 1 / Arm 2 validation tie at 0.850.
+
+That tie is exact, and is the reason no rule could have been written honestly:
+`cross_arm_val_mcnemar.csv` records 15 items only Arm 1 gets right, 15 only Arm 2 gets right,
+30 discordant, **p = 1.000**. The arms are differently-wrong, not redundantly-right.
+
+**Models are fit on `split_fit` only for the test run — no refit on fit + val.** The tested model
+is then the exact model that was validated, so the validation→test comparison describes one
+object and the ~35pp optimism analysis stays clean. The forgone data is 200 of 8,891 items
+(2.2%), negligible against a 3.5pp SE. Do not "improve" this by refitting on the full training
+set later.
+
+**Arm 2 is retrained in the Colab results notebook, never loaded from a Drive checkpoint.** The
+Arm 2 run recorded `refit_agreement = 1.0`, so a seed-44 retrain at the frozen 15 epochs
+reproduces the validated model exactly, and the notebook stays reproducible for a marker who has
+no access to anyone's Drive.
+
    Epoch/checkpoint selection *within* each encoder is unchanged: standard hold-out,
    within-1-SE-prefer-fewest-epochs.
 3. **Never state a number that was not printed by code you just ran.** No estimated, recalled or
@@ -162,11 +208,32 @@ Two guards now make this impossible to repeat, and neither may be removed:
 
 ## The validation caveat (state this in any results discussion)
 
-Validation is a single stratified hold-out of 200 items / 102 classes. It **over-estimates test
-accuracy by roughly 35pp** (~0.77 vs ~0.40 for Arm 1). Cause: the ~10 questions per disease were
-generated in one pass, so a held-out question is a phrasing sibling of those left in training
-(cosine 0.572) while a test question is not (0.391). Cross-validation would not fix this — siblings
-remain inside every fold.
+Validation is a single stratified hold-out of 200 items / 102 classes, and it over-estimates test
+accuracy. Cause: the ~10 questions per disease were generated in one pass, so a held-out question
+is a phrasing sibling of those left in training (cosine 0.572) while a test question is not
+(0.391). Cross-validation would not fix this — siblings remain inside every fold.
+
+**Measured optimism, corrected 2026-08-24** from the frozen test run in `05_results.ipynb`:
+
+| Arm 1 (frozen: QLAD, class_blob, ngram (1,2), k=1) | validation | test | optimism |
+|---|---|---|---|
+| accuracy | 0.850 | **0.765** | **8.5pp** |
+
+Test acc@5 = 0.925, acc@10 = 0.945, acc@20 = 0.975 (so Arm 3's test shortlist ceiling is 0.975).
+
+**The earlier "~0.77 vs ~0.40, roughly 35pp" figure is superseded and must not be repeated.** It
+described a pre-freeze Arm 1 — index variant `Q`, the question-only index, before the QLAD /
+class_blob / ngram (1,2) switch. It is not the frozen system and never was. The real optimism of
+the frozen system is 8.5pp, a quarter of the retired figure.
+
+Do not attribute the improvement to any single lever as though it were measured: what *is*
+measured is 0.765 for the frozen config, alongside `report_outline.md`'s recorded span of
+0.440–0.700 in test accuracy across the four class_blob variants at the pre-§4b vectoriser. The
+direction is consistent with the index switch carrying it, but no isolating ablation was run at
+the frozen vectoriser, so state it as consistent-with, not as demonstrated.
+
+Anything in `report_outline.md` or `report/report_draft.md` still quoting ~0.40 or 35pp needs
+rewriting before submission — §2.5 and §4.2 of the outline are both built on the retired number.
 
 Validation has 200 items, so SE ≈ 3.5pp. **Differences below ~7pp are noise.** Do not describe a
 configuration as "better" on a sub-7pp margin without a paired test.
