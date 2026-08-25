@@ -41,6 +41,7 @@ REQUIRED_FILES: list[Path] = [
     ARTEFACTS_DIR / "split_fit.csv",  # the only text either arm is allowed to fit on
     ARTEFACTS_DIR / "split_val.csv",  # not scored here; loaded for the shape/identity check
     ARTEFACTS_DIR / "arm1_test_predictions.csv",  # CPU-side Arm 1, for the reproduction assert
+    ARTEFACTS_DIR / "arm2_val_metrics.csv",  # §3b compares the retrain against this
     TRAIN_CSV,  # full train CSV, for the label space and the shape check
 ]
 
