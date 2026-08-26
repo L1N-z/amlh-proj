@@ -33,91 +33,85 @@
     "vocabulary": "None"
   },
   "table1_frozen_values": {
-    "ngram_range": "(1, 1)",
+    "ngram_range": "(1, 2)",
     "stop_words": "None",
     "min_df": 1,
     "max_df": 1.0,
     "sublinear_tf": false,
     "lemmatise": false,
-    "index_variant": "Q",
+    "index_variant": "QLAD",
     "index_scheme": "class_blob"
   },
   "table5_std_val_n": 200,
   "table5_std_val_n_classes": 102,
   "table5_hard_val_n": 400,
   "table5_hard_val_n_classes": 400,
-  "table5_frozen_test_acc_available": false,
-  "table5_se_std_val_pp": 2.9,
-  "table5_se_hard_val_pp": 1.92,
+  "table5_frozen_test_acc_available": true,
+  "table5_frozen_test_acc": 0.765,
+  "table5_se_std_val_pp": 2.52,
+  "table5_se_hard_val_pp": 2.45,
   "table5_rows": [
     {
       "name": "Frozen configuration (baseline)",
-      "std_acc": 0.785,
-      "hard_acc": 0.18,
-      "vocab_size": 4257,
+      "std_acc": 0.85,
+      "hard_acc": 0.3975,
+      "vocab_size": 237037,
       "is_baseline": true
     },
     {
-      "name": "ngram_range=(1,2)",
-      "std_acc": 0.745,
-      "hard_acc": 0.205,
-      "vocab_size": 29181,
+      "name": "ngram_range=(1,1) (unigrams only)",
+      "std_acc": 0.82,
+      "hard_acc": 0.3275,
+      "vocab_size": 16671,
       "is_baseline": false
     },
     {
       "name": "min_df=2",
-      "std_acc": 0.49,
-      "hard_acc": 0.0775,
-      "vocab_size": 2052,
+      "std_acc": 0.755,
+      "hard_acc": 0.305,
+      "vocab_size": 78757,
       "is_baseline": false
     },
     {
       "name": "sublinear_tf=True",
-      "std_acc": 0.79,
-      "hard_acc": 0.225,
-      "vocab_size": 4257,
+      "std_acc": 0.87,
+      "hard_acc": 0.53,
+      "vocab_size": 237037,
       "is_baseline": false
     },
     {
       "name": "stop_words='english'",
-      "std_acc": 0.765,
-      "hard_acc": 0.1825,
-      "vocab_size": 4056,
+      "std_acc": 0.85,
+      "hard_acc": 0.4,
+      "vocab_size": 247743,
       "is_baseline": false
     },
     {
       "name": "Lemmatisation enabled (en_core_web_sm, stop words kept as frozen)",
-      "std_acc": 0.81,
-      "hard_acc": 0.215,
-      "vocab_size": 3472,
+      "std_acc": 0.84,
+      "hard_acc": 0.3525,
+      "vocab_size": 239335,
       "is_baseline": false
     },
     {
-      "name": "NHS documents uncleaned (boilerplate retained; no-op under frozen variant 'Q', which has no D component)",
-      "std_acc": 0.785,
-      "hard_acc": 0.18,
-      "vocab_size": 4257,
+      "name": "NHS documents uncleaned (boilerplate retained)",
+      "std_acc": 0.85,
+      "hard_acc": 0.4,
+      "vocab_size": 242212,
       "is_baseline": false
     },
     {
       "name": "index_variant=QL",
-      "std_acc": 0.795,
-      "hard_acc": 0.1725,
-      "vocab_size": 4333,
+      "std_acc": 0.815,
+      "hard_acc": 0.2025,
+      "vocab_size": 30700,
       "is_baseline": false
     },
     {
       "name": "index_variant=QLA",
-      "std_acc": 0.77,
-      "hard_acc": 0.2625,
-      "vocab_size": 10924,
-      "is_baseline": false
-    },
-    {
-      "name": "index_variant=QLAD",
-      "std_acc": 0.835,
-      "hard_acc": 0.3275,
-      "vocab_size": 16671,
+      "std_acc": 0.84,
+      "hard_acc": 0.305,
+      "vocab_size": 141423,
       "is_baseline": false
     }
   ],

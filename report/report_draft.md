@@ -2,173 +2,164 @@
 
 ### 1.1 Literature Review
 
-Natural language processing has become invaluable for many clinical tasks, from Electronic Health Records (EHR) phenotyping to patient communication systems. Patient question classification is a vital task that can support medical information retrieval, automated patient triage and clinical decision support systems.
+Natural language processing has become invaluable for many clinical tasks, from Electronic Health Records (EHR) phenotyping to patient communication systems. Patient question classification supports medical information retrieval, automated patient triage and clinical decision support.
 
-Historically, healthcare NLP relied on rule-based methods or classical machine learning models, with Term Frequency - Inverse Document Frequency (TF – IDF) vectorization being a traditional baseline, paired with distance-based retrieval. Questions are represented as sparse TF-IDF vectors, and test questions are classified based on the labels most similar. Studies have demonstrated that TF-IDF baselines remain highly robust and computationally efficient despite struggling with semantic variation, synonyms, and new vocabulary.
+Historically, healthcare NLP relied on rule-based methods or classical machine learning, with TF–IDF vectorisation a traditional and durable baseline, paired with distance-based retrieval: questions are represented as sparse TF-IDF vectors and classified by their most similar labels. TF-IDF baselines remain robust and computationally efficient despite struggling with semantic variation, synonyms and novel vocabulary.
 
-Transition to deep learning has allowed models to capture context-aware semantic embeddings, allowing them to understand specialised medical terminology better than traditional approaches. Bidirectional Encoder Representations from Transformers (BERT) models fine-tuned on clinical corpora—such as BioBERT and ClinicalBERT have achieved state-of-the-art results on clinical text classification. The emergence of large language models (LLMs) has also revolutionised clinical NLP, allowing to perform complex text classification with effective prompting techniques at entirely inference time (Sander Schulhoff et al., 2024). However, fine-tuned encoders beat zero-shot LLMs on biomedical classification tasks (Chen et al., 2025).
-
-To bridge the performance gap without resource-intensive parameter updates, for clinical tasks where specialised domain knowledge is missing from the pre-training corpus, Retrieval-Augmented Generation (RAG) architectures can be deployed to dynamically retrieve relevant clinical guidelines and prepend them as context, reducing model hallucinations and ensuring factually grounded responses.
-
-\+ zero-/few-shot and chain-of-thought prompting, RAG.
+Deep learning captures context-aware embeddings, representing specialised terminology better than lexical methods: BERT models fine-tuned on clinical corpora — BioBERT, ClinicalBERT — achieve state-of-the-art clinical text classification. Large language models have since enabled in-context learning, classifying purely through prompting, with zero-shot, few-shot and chain-of-thought the dominant strategies for supplying context without any parameter update (Schulhoff et al., 2024). Fine-tuned encoders nonetheless beat zero-shot LLMs on biomedical classification (Chen et al., 2025), motivating retrieval-augmented generation — prepending retrieved clinical text as context — to close that gap without further training while reducing hallucination.
 
 ### 1.2 Motivation and Rationale
 
-The primary aim of this coursework is to evaluate and compare traditional lexical retrieval and deep general neural approaches on a 906-way medical condition classification task.
+This coursework's primary aim is to evaluate traditional lexical retrieval against deep neural approaches on a 906-way medical condition classification task, using accuracy and F1, and considering implications for digital health safety, transparency and compute cost.
 
-The comparison will be evaluated using classification accuracy and F1-score, and the implications for digital health in terms of safety, transparency, and computational resource requirements.
+Three arms implement this comparison end to end: Arm 1, TF–IDF vectorisation with cosine k-nearest-neighbour retrieval over a class-level index; Arm 2, Bio_ClinicalBERT fine-tuned as a 906-way classifier; and Arm 3, the same TF–IDF retrieval shortlisting candidates for an LLM to re-rank by prompting. We hypothesise retrieval will be a strong baseline because class support is uniform at ~10 examples, limiting the encoder's advantage over it by that same sparsity.
 
-name the three arms. Retrieval will be a strong baseline because support is uniform at around 10 examples, and the encoder's advantage will be limited by that same sparsity.
-
-state the contribution beyond running models: the near-duplication audit, the \*\*sibling-homogeneity, diagnosis of the validation–test gap\*\*, and paired significance testing.
+The contribution goes beyond running three models against each other: a near-duplication audit ruling out leakage, a sibling-homogeneity diagnosis explaining why hold-out validation over-estimates test accuracy, and paired McNemar testing for every head-to-head comparison, rather than judging accuracy gaps against a single-proportion standard error.
 
 ## Methodology
 
 ### 2.1 Dataset Description
 
-Dataset has been synthetically generated using ChatGPT, derived from the patient information section of the NHS UK website, and released as part of the OpenGPT dataset, after manual human validation.
+The dataset was synthetically generated using ChatGPT from the NHS UK website's patient-information section, released as part of the OpenGPT dataset after manual human validation.
 
-The dataset covers 906 medical conditions, with multiple Q&A pairs for each. The training set covers all 906 conditions across 8,891 questions, with the validation set containing 102 diseases all also present in the training set, both containing no duplicates or nulls. 87.9% of the classes have exactly 10 Q&A pairs, with only 4 classes exceeding 10 and one class below 5, confirming a near-uniform distribution that requires no class weighting or resampling.
-
-Average lengths of training and testing sets are 8.4 and 7.4 respectively – relatively similar and justify the 64 limit for BERT.
+It covers 906 conditions with multiple Q&A pairs each; training spans all 906 across 8,891 questions. The provided **test set** — read once, in §3's frozen run — covers 200 questions over 102 of those diseases, all present in training. It is distinct from the internally constructed **validation split** (§2.5), drawn from training alone and matching the test set's size and class count by design. Neither has duplicates or nulls, and 87.9% of classes hold exactly 10 pairs — near-uniform, needing no resampling. Questions are short: 8.4 words on average in training, 7.4 in test.
 
 ### 2.2 Data Preprocessing
 
-Text was converted to features by two routes: scikit-learn's TfidfVectorizer for the retrieval arm and the Bio\_ClinicalBERT WordPiece tokeniser for the neural arm.
+Text was converted by two routes: TfidfVectorizer for retrieval, the Bio_ClinicalBERT WordPiece tokeniser for the neural arm. Only the question field is input; `reference_url` was dropped since it maps directly onto the disease label. Labels were preserved case-sensitively, since NHS filenames match label casing. Table 1 lists every setting searched against its default; `min_df=1` avoids discarding rare class-identifying terms.
 
-Only the question field is used as model input and reference\_url was dropped to avoid leaking the target because it directly maps onto the disease label. Labels were preserved, including the six non-lower-case, because the NHS document filenames match label casing exactly and the lookup runs on a case-sensitive filesystem. Support is near-uniform at roughly ten questions per class, so up-sampling, down-sampling or augmentation was not necessary.
+Stop-word removal and lemmatisation were tested as ablations and rejected. Removal risks a large share of an 8.4-word question, and because the text is lowercased, two of the 155 clinical acronyms in the training questions — AS (ankylosing spondylitis) and ME (myalgic encephalomyelitis) — appear in scikit-learn's stop-word list and would be silently destroyed. IDF already down-weights frequent terms regardless.
 
-Three vectoriser settings with stop-word removal and lemmatisation were searched over the grid:
+Questions were capped at `max_length=48` rather than BERT's default 512: the longest needs only 44 tokens including special tokens, attention cost is quadratic in length, and truncation at 48 measures 0%.
 
-- \`ngram\_range\`to select between indexing single words or also word pairs;
-- \`min\_df\` to set the minimum number of documents a term must appear in to be kept, eventually set as min\_df=1 to avoid discarding rare class-identifying terms;
-- \`sublinear\_tf\` to verify that replacing raw term count with is not effective for short questions (8.4 words) with limited repetitions.
-
-Stop-word removal and lemmatization were run as separate ablations. Removal of common words in short questions averaging 8.4 words in length risked deleting a large meaningful proportion of the question. Additionally, because the text is lowercased, two clinical abbreviations – AS (ankylosing spondylitis) and ME (myalgic encephalomyelitis) would have been interpreted as stop words and discarded. Therefore, removal was considered lossy and redundant, as IDF already assigns near-zero weights to frequent terms. The ablation test shown in Table X **{TABLE REF}** demonstrated no benefit of lemmatisation and stop word removal, so these were not adopted.
-
-Lowercasing, the tokenisation pattern (?u)\\b\\w\\w+\\b (which splits on non-word characters and discards single-character tokens – deemed safe for clinical text), smoothed inverse document frequency (IDF) weighting and Euclidean normalisation were left at their defaults.
-
-For the neural model, questions were tokenised into WordPiece units and capped at 48 instead of default 512 tokens, which Bio\_ClinicalBERT splits into 44 tokens including the two special tokens, leaving four tokens of headroom. This adjustment allows to reduce the attention cost to comply with limited computational resources, since self-attention scales quadratically with sequence length. The measured truncation rate of 0% confirmed that no question was shortened.
-
-The NHS reference documents required cleaning, because they form part of the search index (under the selected QLAD) and are scored at retrieval time. Navigation text, image-credit links and "Page last reviewed" footers, accounting for 4.96% of characters, were stripped to avoid diluting the documents containing them. Cleaning has cut the number of such terms present in over 95% of the documents from 22 to 13. However, no spelling correction, negation or missing values handling has been performed due to the clean nature of the documents. Other function words were handled by the Term Frequency – inverse document frequency (TF-IDF), which adjusts for disproportionate word frequency.
+NHS documents were cleaned before indexing, since under QLAD they are scored at retrieval time: navigation text, image-credit links and "page last reviewed" footers made up 4.96% of characters, and stripping them cut the terms present in over 95% of documents from 22 to 13.
 
 **Table 1. Preprocessing and index-construction ablations.**
 
 | **Stage** | **Parameter** | **Value used** | **Library default** | **Changed** | **Source** |
 | --- | --- | --- | --- | --- | --- |
 | Case folding | lowercase | True | True | No | default |
-| Tokenisation | token\_pattern | (?u)\\b\\w\\w+\\b | (?u)\\b\\w\\w+\\b | No | default |
-| N-grams | ngram\_range | (1, 1) | (1, 1) | No | grid |
-| Stop words | stop\_words | None | None | No | grid |
-| DF floor | min\_df | 1 | 1 | No | grid |
-| DF ceiling | max\_df | 1.0 | 1.0 | No | fixed |
-| Term weighting | sublinear\_tf | False | False | No | grid |
-| IDF | use\_idf | True | True | No | default |
-| IDF smoothing | smooth\_idf | True | True | No | default |
+| Tokenisation | token_pattern | (?u)\b\w\w+\b | (?u)\b\w\w+\b | No | default |
+| N-grams | ngram_range | (1, 2) | (1, 1) | Yes | grid (variant-specific re-tune, §2.3) |
+| Stop words | stop_words | None | None | No | grid |
+| DF floor | min_df | 1 | 1 | No | grid |
+| DF ceiling | max_df | 1.0 | 1.0 | No | fixed |
+| Term weighting | sublinear_tf | False | False | No | grid |
+| IDF | use_idf | True | True | No | default |
+| IDF smoothing | smooth_idf | True | True | No | default |
 | Normalisation | norm | l2 | l2 | No | default |
-| Lemmatisation | spaCy model / enabled | en\_core\_web\_sm / disabled | n/a (not a TfidfVectorizer parameter) | No | ablation |
-| BERT tokenisation | WordPiece: max\_length/padding/truncation | not frozen -- config.py HYPERPARAMETERS.bert\_model\_name and max\_length are None as of this run (Arm 2 not yet run/selected) | model\_max\_length=512 (BERT-family default) | \- | pending |
+| Lemmatisation | spaCy model / enabled | en_core_web_sm / disabled | n/a (not a TfidfVectorizer parameter) | No | ablation |
+| BERT tokenisation | WordPiece: model / max_length/padding/truncation | Bio_ClinicalBERT / 48, pad to max_length, truncate | model_max_length=512 (BERT-family default) | Yes | grid (§2.2 length percentiles; §2.4 model selection) |
 
-Settings applied to the TF–IDF retrieval arm (scikit-learn TfidfVectorizer) and the neural arm (Bio\_ClinicalBERT WordPiece tokeniser), shown against the corresponding library defaults. Source indicates how each value was arrived at: selected by grid search, resolved by ablation (Table X), fixed a priori, or left at the library default.
+Source indicates how each value was arrived at: grid search, ablation (Table X), fixed a priori, or the library default.
 
-**Table X. Preprocessing and index-construction ablations.**
+**Table X. Step-2 preprocessing and index-variant grid (pre-freeze; superseded by the frozen configuration below).**
 
-| **Variant** | **Hold-out acc** | **Shift-aware acc** | **Δ vs frozen (shift-aware)** | **Vocab size** | **Test acc (frozen row only)** |
-| --- | --- | --- | --- | --- | --- |
-| Frozen configuration (baseline) | 0.785 | 0.180 | 0.000 (baseline) | 4257 | not run |
-| ngram\_range=(1,2) | 0.745 | 0.205 | +0.025 | 29181 | — |
-| min\_df=2 | 0.490 | 0.077 | \-0.102 | 2052 | — |
-| sublinear\_tf=True | 0.790 | 0.225 | +0.045 | 4257 | — |
-| stop\_words='english' | 0.765 | 0.182 | +0.003 | 4056 | — |
-| Lemmatisation enabled (en\_core\_web\_sm) | 0.810 | 0.215 | +0.035 | 3472 | — |
-| NHS documents uncleaned | 0.785 | 0.180 | +0.000 | 4257 | — |
-| index\_variant=QL | 0.795 | 0.172 | \-0.008 | 4333 | — |
-| index\_variant=QLA | 0.770 | 0.263 | +0.083 | 10924 | — |
-| index\_variant=QLAD | 0.835 | 0.328 | +0.148 | 16671 | — |
+Run at the step-2 vectoriser (`Q`, ngram (1,1)), *before* §2.3 moved the frozen configuration to `QLAD` and forced the re-tune (notebook §4b) to `(1,2)`. Rows are deltas around the step-2 baseline (0.785), not the frozen system, which scores 0.850 validation / 0.765 test (§3.2). No ablation was re-run at the frozen vectoriser, so the QLAD/class_blob improvement shown is consistent with the evidence, not demonstrated by it.
+
+| **Variant** | **Hold-out acc** | **Shift-aware acc** | **Δ vs step-2 baseline (shift-aware)** | **Vocab size** |
+| --- | --- | --- | --- | --- |
+| Step-2 baseline (`Q`, ngram (1,1)) | 0.785 | 0.180 | 0.000 (baseline) | 4257 |
+| ngram_range=(1,2) | 0.745 | 0.205 | +0.025 | 29181 |
+| min_df=2 | 0.490 | 0.077 | -0.102 | 2052 |
+| sublinear_tf=True | 0.790 | 0.225 | +0.045 | 4257 |
+| stop_words='english' | 0.765 | 0.182 | +0.003 | 4056 |
+| Lemmatisation enabled (en_core_web_sm) | 0.810 | 0.215 | +0.035 | 3472 |
+| NHS documents uncleaned | 0.785 | 0.180 | +0.000 | 4257 |
+| index_variant=QL | 0.795 | 0.172 | -0.008 | 4333 |
+| index_variant=QLA | 0.770 | 0.263 | +0.083 | 10924 |
+| index_variant=QLAD | 0.835 | 0.328 | +0.148 | 16671 |
 
 ### 2.3 Traditional NLP Approach
 
-#### Method
+TF–IDF vectorisation feeds a cosine k-nearest-neighbour classifier: the top-k neighbours in a class-level index vote, weighted by similarity, for the predicted label (Figure F4). At the frozen k=1 this collapses to nearest-neighbour, but the same weighted ranking backs Arm 3's depth-20 shortlist, letting one very close neighbour outrank several weak ones.
 
-First, TF–IDF vectorisation applied to the dataset, cosine k-nearest-neighbours similarity-weighted vote over neighbour labels selecting k (1) candidates with the highest sum of cosine similarities of neighbours.
+Four index variants were tested: question text only (Q), +label text (QL), +training answers (QLA), +NHS documents (QLAD). Training-side answers and documents are indexed only as class evidence — prediction-time input remains the test question alone — so this is knowledge-base construction, not leakage.
 
-\- Rationale for weighting over majority vote: at k\_neighbors=1 (frozen) the two collapse, but the same ranking function backs the depth-20 shortlist Arm 3 consumes, where weighting lets a single very close neighbour outrank several weak ones.
+LinearSVC, Random Forest and Logistic Regression were also fit directly on TF-IDF vectors as supervised baselines, scoring 0.815, 0.765 and 0.635 — none beating retrieval's 0.850, so no reason to prefer a learned boundary over neighbour matching.
 
-Four index variants have been tested:
+Selection outcomes are in §3.2. QLAD's NHS-prose index text forced a vectoriser re-tune, selecting `ngram_range=(1,2)`, `min_df=1` and no stop-word removal. Shortlist depth was fixed at 20, where acc@k plateaus; the ceiling bounding Arm 3 is the test figure of 0.975, not the validation 0.995.
 
-- question text only (Q),
-- +label text (QL),
-- +training answers (QLA),
-- +NHS documents (QLAD).
+### 2.4 Neural Approaches
 
-Training-side answers/documents are indexed as class evidence, so the only input at prediction time is the test question. This is not leakage since the documenta are not read at inference time and is knowledge-based construction. The NHS .txt documents are used as an external knowledge source.
+#### Arm 2: fine-tuned BERT classifier
 
-Supervised baseline.
+Bio_ClinicalBERT was fine-tuned end-to-end with a 906-way head (AdamW, `learning_rate=2e-5`, `batch_size=16`, `max_length=48`; Figure F5). Learning rate and batch size were held at defaults across both encoders rather than swept: at ~3.5pp SE a 200-item hold-out cannot resolve such a grid. Epoch selection uses a within-1-SE-prefer-fewest-epochs rule over the training and validation curves of Figure F6: epoch 22 reaches 0.870 but epoch 14 already reaches 0.850, so the cheaper checkpoint is kept.
 
-As a second traditional approach, LinearSVC, Logistic Regression, and Random Forest were fit directly on TF-IDF question vectors, testing a learned decision boundary against simple neighbour matching. On the standard hold-out set, LinearSVC reached 0.815 accuracy (0.905 accuracy at 5 **{at 5 WHAT?},** macro-averaged **{WHAT IS MACRO AVERAGED}** F1 0.671), Logistic Regression and Random Forest had accuracy of 0.765 and 0.635 respectively. The frozen retrieval model scored 0.850 - 3.5 percentage points above the best supervised model. This gap sits within the roughly 7-percentage-point noise band expected **{WHY IS IT ROUGHLY 7 EXPECTED?}** from a 200-item validation set, so the improvement is not statistically significant but sufficient to prefer retrieval.
+Bio_ClinicalBERT (0.850) was compared against `bert-base-uncased` (0.875) by McNemar: 6 items only the former got right, 11 only the latter, p=0.332. Unresolved, so Bio_ClinicalBERT is retained on the declared prior that an in-domain clinical encoder is the default for a clinical task — not because it scored higher; it did not. This prior was formalised after the comparison had been seen, unlike Arm 1's pre-registered tie-break.
 
-#### Selecting the index variant and scheme.
+#### Arm 3: LLM shortlist re-ranking
 
-On the standard hold-out, all four index variants tied at 0.820 accuracy. A follow-up validation split was used to rank them instead: QLAD (0.3275) led the next-best variant QLA (0.2625) by 0.065, more than its standard error, so was the selected index variant.
+Arm 3 reuses the frozen Arm 1 index to shortlist 20 candidate labels per question and prompts an LLM to pick one, under three conditions: zero-shot (candidates only), few-shot (plus two worked examples), and chain-of-thought (plus a reasoning instruction). The reply is matched back to a candidate by name; an unmatched reply falls back to Arm 1's top-1 — the system's prediction without the LLM — rather than a random guess.
 
-For the indexing scheme, the standard hold-out selected class\_blob (0.850) over additive\_per\_row (0.730), a margin of 0.120, which was confirmed by the follow-up split (0.3975 vs 0.325, a margin of 0.0725). Both margins exceeded their standard errors, informing the index\_scheme = "class\_blob" decision.
-
-Switching to QLAD required re-tuning the vectoriser, since QLAD's indexed text is full NHS prose rather than short questions and changing the index variant required to switch the vectoriser. The re-tuned grid search selected an n-gram range of (1,2) — single words and word pairs — a minimum document frequency of 1, and no stop-word removal.
-
-#### Bounding Arm 3
-
-To measure how much room a later shortlist-based stage has to work with, how often the correct label appears within the top k retrieved candidates was checked: 0.85 at k=1, 0.98 at k=5, 0.99 at k=10, and 0.995 at k=20. The shortlist size was fixed at 20 as a declared setting rather than tuned further as there was little change.
-
-### 2.4 Neural (LLM) Approach
-
-\- Architecture & training setup — Bio\_ClinicalBERT (emilyalsentzer/Bio\_ClinicalBERT) with a 906-way classification head, AdamW optimiser, learning\_rate=2e-5, batch\_size=16, max\_length=48 (carried over from the §2.2 question-length justification). Source: config.py.
-
-\- Epoch/checkpoint selection rule — standard hold-out, within-1-SE-prefer-fewest-epochs. Bio\_ClinicalBERT: epoch 22 reaches 0.870 accuracy but epoch 14 reaches 0.850 — a 2pp gap, inside the ~3.5pp SE for n=200 — so the cheaper checkpoint is kept: num\_epochs=15, val accuracy 0.850 (arm2\_val\_metrics.csv, arm2\_history\_bioclinicalbert.csv).
-
-\- Encoder comparison, the tie-break in action. Bio\_ClinicalBERT (0.850) vs bert-base-uncased (0.875, its own selected checkpoint at epoch 19) — bert-base scores 2.5pp higher. McNemar's exact test over the 200 paired predictions: 6 items only Bio\_ClinicalBERT got right, 11 only bert-base got right, 17 discordant total, p = 0.332 (arm2\_encoder\_mcnemar.csv). Since p ≥ 0.05, the comparison is unresolved — Bio\_ClinicalBERT is kept on the declared clinical-domain prior, not because it scored higher. State plainly it did not.
-
-\- Disclosure sentence required here (per CLAUDE.md): this rule was formalised on 2026-08-17, after the comparison was seen — not pre-registered like the Arm 1 tie-break. Say so explicitly; don't let it read as if it were decided in advance.
-
-\- Loss/accuracy curves — both full 24-epoch histories exist (arm2\_history\_bioclinicalbert.csv, arm2\_history\_bertbase.csv), so Figure F6 (train/val loss curves, "explicitly required" by the brief) is plottable now, even though it's filed under §3.2 in the figure inventory.
+Two generators are compared at temperature 0: primary `microsoft/MediPhi-Guidelines` and secondary `google/flan-t5-large`; prompts are in Table 2. A 6-cell grid on 200 items cannot support six-way selection, so choice runs in two pre-registered McNemar stages: prompt condition on the primary generator alone (unresolved → simplest-prompt prior), then model at that condition (unresolved → clinical prior). Outcomes are in §3.2.
 
 ### 2.5 Experimental Protocol
 
-Stratified splitting via train\_test\_split is infeasible here: scikit-learn requires at least one held-out example per class, but the label space (906) exceeds the target validation size (200). An unstratified split leaves the number of represented classes to chance (177 under seed 42) and provides no guarantee that each class retains sufficient examples for fitting. We therefore allocate a fixed quota across a sampled subset of classes, mirroring the test set's size and class count while guaranteeing every class retains at least two training examples.
+Stratified splitting via `train_test_split` is infeasible: it requires one held-out example per class, but the 906-class label space exceeds the 200-item validation size, and an unstratified split leaves class coverage to chance (177 classes under seed 42). We instead allocate a fixed quota across a sampled subset of classes, mirroring the test set's size and class count while keeping at least two training examples per class.
 
-Results
+At n=200 the single-proportion SE is ≈3.5pp, so differences below ~7pp are indistinguishable from noise; every comparison is instead checked with McNemar's exact test, since paired predictions on the same items carry more information than two independent proportions. Accuracy is reported with bootstrap 95% CIs, and compute cost in Table 3.
 
-3.1 Exploratory Data Analysis
+A second, shift-aware protocol breaks ties the standard hold-out cannot resolve: a hold-out drawn only from training questions sharing no word with their own label (1,423 of 8,891), because §3.1 shows the test distribution resembles this lexeme-absent stratum far more than the standard split's lexeme-present majority. The standard hold-out decides wherever it discriminates by more than its own SE; only where it does not does the shift-aware split break the tie. This was pre-registered and scoped to Arm 1 index selection only — a scoping whose cost §4.2 discusses.
 
-Two representations tested: sibling homogeneity (**why chosen?)** and lexeme (**why chosen?),** median max cosine distance was 0.485 with only 0.5% above 0.9, while under a unigram representation the classifier uses 0.613.
+Every model, hyperparameter and prompt decision was made on validation alone, and test predictions were generated once, after all were frozen.
 
-Training questions are lexical siblings, so sibling homogeneity used. In the training, the nearest same-class sibling was 0.572, while in the test the nearest own-class training question had the score of 0.391, while the nearest other-class of 0.510, an increase of 0.119. **{Insert conclusion sentence}**
+## Results
 
-As a robustness check and to investigate the nature of the data, it was verified that 84.0% of training questions contain a word from their own disease label, while only 5.5% of test questions do.
+### 3.1 Exploratory Data Analysis
 
-Therefore, a wrong-class training question is closer than any own-class one for **59.5%** of test questions, against **33.8%** under training leave-one-out. Nearest-neighbour decision rule is therefore disadvantaged on this test distribution, which will motivate the shift-aware selection protocol described in section 2.5.
+Class support, question length and label-family structure are summarised in Figure F1, and the TF–IDF feature space in Figure F3. Near-duplication and sibling homogeneity use different representations, matched to what each detects: bigrams for duplicate phrasing, unigrams for the within-class comparison. Median per-test-question maximum similarity to any training question is 0.485, with only 0.5% above the 0.9 near-duplicate threshold, so the task is not solvable by memorisation.
 
-3.2 Performance Comparison
+Training questions are lexical siblings (Figure F2): the nearest same-class sibling scores 0.572, while a test question's nearest own-class training question scores only 0.391 — and its nearest *other*-class question scores 0.510, closer by 0.119. Consistently, 84.0% of training questions contain a word from their own disease label against only 5.5% of test questions.
 
-3.3 Error Analysis
+The consequence is direct: for 59.5% of test questions a wrong-class training question sits closer than any own-class one, against 33.8% under training leave-one-out. A nearest-neighbour rule is structurally disadvantaged on the test distribution, and any validation estimate drawn from siblings will be optimistic — motivating the shift-aware protocol (§2.5).
 
-Discussion
+### 3.2 Performance Comparison
 
-4.1 Comparison of Approaches
+| System | Validation | Test | 95% CI (test) | Optimism | Macro-F1 (test) |
+| --- | --- | --- | --- | --- | --- |
+| Arm 1 (TF–IDF k-NN) | 0.850 | **0.765** | [0.705, 0.820] | 8.5pp | 0.563 |
+| Arm 2 (Bio_ClinicalBERT) | 0.850 | **0.615** | [0.545, 0.680] | 23.5pp | 0.354 |
+| Arm 3 (shortlist + LLM) | 0.720 | **0.720** | [0.660, 0.780] | 0.0pp | 0.494 |
 
-4.2 Impact of Design Choices
+Selection outcomes: all four index variants tied at 0.820 on the standard hold-out, so the tie-break deferred to the shift-aware split, ranking QLAD (0.328) over QLA (0.263). Arm 3's prompt conditions were indistinguishable (smallest p=0.511), so zero-shot was kept on the simplicity prior; the generator comparison did resolve, MediPhi beating flan-t5-large 0.720 to 0.635 (p=0.033).
 
-4.3 Implications for Healthcare
+**The validation ranking then inverts on test** (Figure F9):
 
-Notes:
+| Pair | Validation | Test |
+| --- | --- | --- |
+| Arm 1 vs Arm 2 | 15/15, p=1.000, unresolved | 37/7, **p=5.3e-06, Arm 1 wins** |
+| Arm 1 vs Arm 3 | 32/6, p=2.4e-05, Arm 1 wins | 20/11, **p=0.150, unresolved** |
+| Arm 2 vs Arm 3 | 33/7, p=4.2e-05, Arm 2 wins | 11/32, **p=0.0019, Arm 3 wins** |
 
-Truncation- robust split – already in section 2.5. Diverges from course so needs justification.
+Every comparison the hold-out resolved, the test set reversed or dissolved. Per-arm optimism explains why: the encoder learns only from training questions and is nearly three times as optimistic as the retriever, whose QLAD index also carries NHS prose owing nothing to sibling phrasing — the arm most dependent on paraphrase collapsed hardest when the paraphrase disappeared. Arm 3's 0.0pp gap is arithmetic, not a finding: 81% of its test items are answered by Arm 1's own top-1 (§3.3), so it tracks Arm 1 minus an intervention penalty.
 
-Run the unstratified train\_test\_split too so that both can be reported in the ablation table — one extra row. It demonstrates knowledge of the standard module tool, shows the choice was tested rather than assumed, and if the two produce similar hyperparameter rankings that's evidence the selection is robust to split design.
+Arms 1 and 2 tying on validation while disagreeing on 15% of items means they are differently-wrong, not redundantly-right. A three-arm oracle would reach 0.830 — but Arm 2 is uniquely correct on only 2 of 200 test items, so a simple ensemble would likely underperform Arm 1 alone.
 
-**A methodological problem to settle before the EDA notebook**
+### 3.3 Error Analysis
 
-The sibling-homogeneity measurement and the acronym analysis both use **test labels** — computing "test question → nearest own-class training question" requires knowing each test question's class. Under a strict reading of "the test set is evaluated once," putting those in 01\_eda breaks the rule I wrote into CLAUDE.md.
+Macro-F1 falls further than accuracy for every arm (Arm 1 0.725 → 0.563), so test errors concentrate in the sparsest classes rather than spreading evenly.
 
-Two defensible resolutions:
+Fine-grained confusion dominates where it can be measured — but only conditioned on such an error being *possible*, i.e. the gold label having a prefix sibling among the 906, since a label without one adds a guaranteed zero to the denominator. On validation, where 88 of 200 items have a sibling, Arm 1 makes 18 within-family errors of 25 possible (72%) and Arm 2 makes 10 of 21. The metric is **not** reportable on test, where only 18 items have a sibling at all, leaving Arm 1 a denominator of one; the unconditioned 0% every arm scores there describes the sample's class composition, not the models (Figure F8).
 
-1. **Compute in 01\_eda, declare it.** Add to §2.5: _"Test labels were used for one distributional diagnostic characterising the validation–test relationship. No model, hyperparameter, preprocessing setting or index variant was selected using test data."_ Honest, and the finding shapes how you read every validation number thereafter.
+Arm 3 decomposes cleanly. Of 200 test items it keeps Arm 1's rank-1 label on 120 (0.958, unchanged), falls back to it on 42 (0.429, inert by construction), and overrides it on 38 — scoring 0.289 where Arm 1 scored 0.526, rescuing 11 and breaking 20. Intervention precision rose from 6-in-50 on validation to 11-in-38 on test but stays net-negative. The LLM had the gold label in 97.5% of test shortlists and still failed to beat the retriever: the failure is overconfidence, not indecision, since every net loss came from an override and none from the fallback.
+
+## Discussion
+
+### 4.1 Comparison of Approaches
+
+Traditional retrieval beats both neural arms on test at a fraction of the compute (Table 3): Arm 1 needs no GPU and no training step, while Arm 3's inference cost is incurred *on top of* Arm 1, since it cannot run without it.
+
+Near-uniform support at ~10 examples per class explains the outcome: too little per-class data for fine-tuning to carve 906 classes apart, while an 8.4-word question's lexical overlap with its class evidence remains strong signal. The encoder compensated by memorising phrasing shared among sibling questions, which is exactly why it lost most when that phrasing disappeared — and validation gave no hint of it.
+
+### 4.2 Impact of Design Choices
+
+The index variant was Arm 1's largest lever, and the shift-aware protocol is what identified it: the standard hold-out could not separate the four variants at all. That is the clearest lesson here — when a hold-out is drawn from paraphrase siblings, a shift-aware split is the better guide to generalisation, and the test results bear it out. No isolating ablation was re-run at the frozen vectoriser, so this remains consistent with the evidence rather than demonstrated by it.
+
+The lesson has an unclaimed corollary. The ablations show `sublinear_tf=True` at 0.530 on the shift-aware split against the frozen 0.398 — over five standard errors — while the standard hold-out separates them by 2pp, inside its own SE. The tie-break was scoped to index selection, so it never reached the vectoriser grid; scoped wider it would have chosen `True`. This surfaced only after the test set had been read, so acting on it now would be a test-informed choice: it is a limitation, and the first thing to change in any repeat.
+
+The rules differ in provenance: Arm 1's and Arm 3's were pre-registered before the numbers were seen, Arm 2's only after — disclosed rather than smoothed over. Both the Arm 2 and Arm 3 priors deliberately retained the lower-scoring option, the intended behaviour of a declared prior rather than a hidden accuracy claim.
+
+### 4.3 Implications for Healthcare
+
+85 identical question strings map to more than one disease — an irreducible error floor. A triage system here should abstain rather than guess: validation accuracy climbs from 0.850 to 0.945 once only the most-confident 36.5% of items are answered (Figure F7). Arm 3 shows the same principle accidentally — its only component that never hurt accuracy was the fallback that declined to re-rank. With the sharp degradation once phrasing shifts, patient-facing classifiers must be validated on genuinely independent data and deployed with a route to human review.

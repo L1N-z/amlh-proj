@@ -2,7 +2,7 @@
 
 from importlib import import_module
 
-__all__ = ["arm3_llm", "results"]
+__all__ = ["arm3_llm", "diagrams", "results"]
 
 
 def __getattr__(name: str):

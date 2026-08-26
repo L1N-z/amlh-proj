@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+from sklearn.metrics import f1_score
 
 from amlh import results
 
@@ -160,3 +161,77 @@ def test_load_available_arms_returns_only_what_exists(tmp_path):
     (tmp_path / "arm1_test_predictions.csv").write_text("question,gold,pred\nq,a,a\n")
     frames = results.load_available_arms(artefacts_dir=tmp_path)
     assert list(frames) == ["arm1_tfidf_knn"]
+
+
+# --- Defect A: the within-family error rate needs a conditioned denominator ---
+
+LABEL_SPACE = ["a_one", "a_two", "b_one", "solo", "other"]
+
+
+def test_prefix_family_sizes_counts_over_the_whole_label_space():
+    sizes = results.prefix_family_sizes(LABEL_SPACE)
+    assert sizes["a"] == 2
+    assert sizes["b"] == 1
+    assert sizes["solo"] == 1
+
+
+def test_family_error_summary_excludes_golds_with_no_sibling():
+    """A gold whose prefix family has one member cannot be confused with a sibling, so it
+    contributes a guaranteed zero to the numerator and must not inflate the denominator.
+    Here only the `a_one` error is a possible family error; the `solo` error is not."""
+    frame = make_frame(["a_two", "other"], ["a_one", "solo"])
+    out = results.family_error_summary(frame, LABEL_SPACE)
+    assert out["n_errors"] == 2
+    assert out["n_family_error_possible"] == 1
+    assert out["n_within_family"] == 1
+    assert out["within_family_share"] == pytest.approx(1.0)
+
+
+def test_family_error_summary_returns_none_share_when_nothing_was_possible():
+    """The defect this guards: an unconditioned rate reads 0% when no error *could* have
+    been within-family, which is a fact about the sample's class composition, not the
+    model. None forces the caller to notice the absent denominator."""
+    frame = make_frame(["other"], ["solo"])
+    out = results.family_error_summary(frame, LABEL_SPACE)
+    assert out["n_family_error_possible"] == 0
+    assert out["within_family_share"] is None
+
+
+def test_family_error_summary_ignores_correct_predictions():
+    frame = make_frame(["a_one", "a_two"], ["a_one", "a_one"])
+    assert results.family_error_summary(frame, LABEL_SPACE)["n_errors"] == 1
+
+
+def test_confusion_pairs_flags_whether_a_family_error_was_possible():
+    frame = make_frame(["a_two", "other"], ["a_one", "solo"])
+    pairs = results.confusion_pairs(frame, label_space=LABEL_SPACE)
+    possible = dict(zip(pairs["gold"], pairs["family_error_possible"]))
+    assert possible["a_one"]
+    assert not possible["solo"]
+
+
+def test_confusion_pairs_omits_the_flag_without_a_label_space():
+    """Back-compatible: callers that never pass a label space keep the original columns."""
+    frame = make_frame(["a_two"], ["a_one"])
+    assert "family_error_possible" not in results.confusion_pairs(frame).columns
+
+
+# --- Defect B: macro-F1 must not depend on a ranking being present ---
+
+def test_score_arms_reports_macro_f1_without_ranking_columns():
+    """Arm 3 emits a single label, not an ordering. macro-F1 needs only top-1, so gating it
+    on the top_* columns silently dropped it for the one arm the error analysis most needs."""
+    frames = {"ranking_less": pd.DataFrame({"question": ["q1", "q2"], "gold": ["a_one", "a_two"],
+                                            "pred": ["a_one", "b_one"]})}
+    scored = results.score_arms(frames)
+    assert scored.loc[0, "macro_f1"] == pytest.approx(
+        f1_score(["a_one", "a_two"], ["a_one", "b_one"], average="macro", zero_division=0)
+    )
+
+
+def test_score_arms_marks_ranked_metrics_unavailable_rather_than_absent():
+    """A blank cell must read as 'cannot produce a ranking', not as a value gone missing."""
+    frames = {"ranking_less": pd.DataFrame({"question": ["q1"], "gold": ["a_one"], "pred": ["a_one"]})}
+    scored = results.score_arms(frames)
+    assert "acc_at_5" in scored.columns and "mrr" in scored.columns
+    assert scored.loc[0, "acc_at_5"] is None or pd.isna(scored.loc[0, "acc_at_5"])

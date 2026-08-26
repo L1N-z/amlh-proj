@@ -14,6 +14,7 @@ Run from the repo root: `python report/tables/build_tables.py`.
 
 import json
 import re
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -162,7 +163,8 @@ def build_table1() -> None:
         f"variant=`{HP.index_variant}`) — never on validation or test text (fit/transform "
         "boundary enforced by `amlh.arm1_tfidf.knn_rank`, which calls `.fit_transform` on "
         "the index only and `.transform` on queries). BERT row: see note in that cell — "
-        "Arm 2 hyperparameters are not yet frozen in config.py."
+        "Arm 2 hyperparameters are frozen in config.py: checkpoint "
+        f"{HP.bert_model_name}, max_length={HP.max_length}, selected epoch {HP.num_epochs}."
     )
     write_md_table(TABLES_DIR / "table1_preprocessing.md",
                     ["Stage", "Parameter", "Value used", "Library default", "Changed?", "Source"],
@@ -185,11 +187,12 @@ def build_table1() -> None:
 
 
 def build_bert_row() -> list[str]:
-    """Reads tokenizer facts for the Arm 2 checkpoint frozen in config.py. As of this
-    run, config.py's bert_model_name/max_length are None (Arm 2 not yet frozen), so no
-    checkpoint-specific value can be reported without guessing. Candidate-tokenizer
-    facts are recorded to table_facts.json for reference but NOT written into the
-    'Value used' cell, which must reflect config.py's actual (unfrozen) state."""
+    """Reads tokenizer facts for the Arm 2 checkpoint frozen in config.py.
+
+    The unfrozen branch below is kept deliberately: it is what stops the table asserting a
+    checkpoint-specific value that config.py does not actually hold. It no longer fires --
+    bert_model_name and max_length were frozen on 2026-08-17 -- but removing it would make
+    a future unfreezing silently produce a confident wrong row instead of an honest one."""
     candidates = {}
     try:
         from transformers import AutoTokenizer
@@ -212,9 +215,14 @@ def build_bert_row() -> list[str]:
     else:
         from transformers import AutoTokenizer
         tok = AutoTokenizer.from_pretrained(HP.bert_model_name)
+        # Several checkpoints ship model_max_length as a huge int sentinel meaning "the
+        # tokenizer imposes no limit of its own". Printed raw it reads as a 31-digit number
+        # in the middle of a report table, so it is named rather than shown.
+        raw_limit = tok.model_max_length
+        limit = "unset (no tokenizer-imposed limit)" if raw_limit > 100_000 else str(raw_limit)
         value_used = (
             f"{type(tok).__name__}, checkpoint={HP.bert_model_name}, "
-            f"model_max_length={tok.model_max_length}, configured max_length={HP.max_length}, "
+            f"model_max_length={limit}, configured max_length={HP.max_length}, "
             f"padding=max_length, truncation=True"
         )
         source = "fixed"
@@ -295,8 +303,12 @@ def _row_vocab_size(train_df: pd.DataFrame, vec_kwargs: dict, variant: str, sche
 ROW_SPECS = [
     dict(name="Frozen configuration (baseline)", vec_overrides={}, variant=HP.index_variant,
          scheme=HP.index_scheme, lemmatise_mode=False, uncleaned_docs=False, is_baseline=True),
-    dict(name="ngram_range=(1,2)", vec_overrides={"ngram_range": (1, 2)}, variant=HP.index_variant,
-         scheme=HP.index_scheme, lemmatise_mode=False, uncleaned_docs=False, is_baseline=False),
+    # The frozen ngram_range is (1,2), so an ablation *to* (1,2) would vary nothing and
+    # report a delta against itself. (1,1) is the counterfactual that carries information:
+    # it is what the vectoriser used before the QLAD switch forced a re-tune.
+    dict(name="ngram_range=(1,1) (unigrams only)", vec_overrides={"ngram_range": (1, 1)},
+         variant=HP.index_variant, scheme=HP.index_scheme, lemmatise_mode=False,
+         uncleaned_docs=False, is_baseline=False),
     dict(name="min_df=2", vec_overrides={"min_df": 2}, variant=HP.index_variant,
          scheme=HP.index_scheme, lemmatise_mode=False, uncleaned_docs=False, is_baseline=False),
     dict(name="sublinear_tf=True", vec_overrides={"sublinear_tf": True}, variant=HP.index_variant,
@@ -306,8 +318,12 @@ ROW_SPECS = [
     dict(name="Lemmatisation enabled (en_core_web_sm, stop words kept as frozen)", vec_overrides={},
          variant=HP.index_variant, scheme=HP.index_scheme, lemmatise_mode=True, uncleaned_docs=False,
          is_baseline=False),
-    dict(name=f"NHS documents uncleaned (boilerplate retained; no-op under frozen variant "
-              f"'{HP.index_variant}', which has no D component)",
+    # Whether this row varies anything depends on the frozen variant carrying a D
+    # component. QLAD does, so the label must not assert the opposite.
+    dict(name=("NHS documents uncleaned (boilerplate retained)"
+               if "D" in (HP.index_variant or "")
+               else f"NHS documents uncleaned (no-op under variant '{HP.index_variant}', "
+                    "which has no D component)"),
          vec_overrides={}, variant=HP.index_variant, scheme=HP.index_scheme, lemmatise_mode=False,
          uncleaned_docs=True, is_baseline=False),
 ]
@@ -321,7 +337,14 @@ for _variant in ("QL", "QLA", "QLAD"):
 def build_table5() -> None:
     set_seed()
     train = load_train()
-    std_split = make_validation_split(train, seed=SEED)
+    # Load the PERSISTED split, never a freshly generated one. make_validation_split at the
+    # same seed does not reproduce artefacts/split_val.csv item for item, so regenerating here
+    # scored this table on a different 200 items than every accuracy quoted elsewhere in the
+    # project - the frozen row read 0.865 against the 0.850 the arms actually report. Every
+    # number in the report has to describe the same hold-out.
+    _persisted = SimpleNamespace(fit=pd.read_csv(ARTEFACTS_DIR / "split_fit.csv"),
+                                 val=pd.read_csv(ARTEFACTS_DIR / "split_val.csv"))
+    std_split = _persisted
     hard_split = make_hard_validation_split(train, seed=SEED, n=400)
 
     FACTS["table5_std_val_n"] = len(std_split.val)
@@ -347,8 +370,16 @@ def build_table5() -> None:
     # No 05_results.ipynb run and no persisted frozen-config test-accuracy artefact
     # exists in artefacts/ as of this run (checked: no file/key holds a frozen-config
     # test accuracy), so the cell is "not run" rather than an inferred value.
-    frozen_test_acc = None  # would be read from a persisted artefact if one existed
+    # Read from the artefact 05_results.ipynb persists, never recomputed here: this script
+    # must not evaluate anything against the test set, and the frozen run is the only
+    # authority on that number.
+    frozen_test_acc = None
+    _test_pred_path = ARTEFACTS_DIR / "arm1_test_predictions.csv"
+    if _test_pred_path.is_file():
+        _test_pred = pd.read_csv(_test_pred_path)
+        frozen_test_acc = float((_test_pred["pred"] == _test_pred["gold"]).mean())
     FACTS["table5_frozen_test_acc_available"] = frozen_test_acc is not None
+    FACTS["table5_frozen_test_acc"] = frozen_test_acc
 
     se_std = float(np.sqrt(results[0]["std_acc"] * (1 - results[0]["std_acc"]) / len(std_split.val)))
     se_hard = float(np.sqrt(results[0]["hard_acc"] * (1 - results[0]["hard_acc"]) / len(hard_split.val)))
@@ -359,7 +390,12 @@ def build_table5() -> None:
     for r in results:
         delta = r["hard_acc"] - frozen_hard_acc
         delta_s = f"{delta:+.3f}" if not r["is_baseline"] else "0.000 (baseline)"
-        test_cell = "not run" if r["is_baseline"] else "—"
+        if not r["is_baseline"]:
+            test_cell = "—"
+        elif frozen_test_acc is None:
+            test_cell = "not run"
+        else:
+            test_cell = f"{frozen_test_acc:.3f}"
         name_md = r["name"] if not r["is_baseline"] else f"**{r['name']}**".replace("**", "")  # no bolding per spec
         row_md = [r["name"], f"{r['std_acc']:.3f}", f"{r['hard_acc']:.3f}", delta_s, str(r["vocab_size"]), test_cell]
         row_tsv = [r["name"], f"{r['std_acc']:.3f}", f"{r['hard_acc']:.3f}", delta_s, str(r["vocab_size"]), test_cell]
@@ -374,10 +410,15 @@ def build_table5() -> None:
         f"Standard-error reference at the frozen row's accuracy: std-val SE ≈ {se_std*100:.2f}pp "
         f"(n={len(std_split.val)}), shift-aware SE ≈ {se_hard*100:.2f}pp (n={len(hard_split.val)}); "
         f"do not call a sub-1-SE difference \"better\". Vocab size is fit on the row's index text over "
-        f"the FULL training set (split-independent), not the std/hard fit subsets. Test-acc column is "
-        f"populated only for the frozen row and is \"not run\": no persisted test-accuracy artefact for "
-        f"the frozen configuration exists as of this run (05_results.ipynb has not executed; Arm 2/3 "
-        f"hyperparameters are still unset in config.py, so the full frozen pipeline is not yet complete)."
+        f"the FULL training set (split-independent), not the std/hard fit subsets. The Test-acc "
+        f"column is populated for the frozen row only, read from "
+        f"`artefacts/arm1_test_predictions.csv` as persisted by the single frozen run in "
+        f"`05_results.ipynb`; no ablation row is ever evaluated against the test set, and this "
+        f"script computes no test accuracy of its own."
+        if frozen_test_acc is not None else
+        f"the FULL training set (split-independent), not the std/hard fit subsets. Test-acc column "
+        f"is \"not run\": no persisted test-accuracy artefact for the frozen configuration exists "
+        f"as of this run."
     )
     header = ["Variant", "Hold-out acc", "Shift-aware acc", "Δ vs frozen (shift-aware)", "Vocab size",
               "Test acc (frozen row only)"]
@@ -569,9 +610,168 @@ def fact_missing_and_duplicates() -> None:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Table 2 -- prompt templates (the brief asks for prompts "in a dedicated table")
+# --------------------------------------------------------------------------- #
+
+PROMPT_MARKER = "You are a helpful assistant"
+
+
+def _first_prompt_of_each_condition() -> dict[str, str]:
+    """One representative prompt per condition, from artefacts/arm3_prompts.txt.
+
+    That file holds all 200 prompts of a condition back to back, so this takes the first of
+    each. They are identical in structure and differ only in the question and the retrieved
+    candidate list -- exactly what a template table should collapse.
+    """
+    path = ARTEFACTS_DIR / "arm3_prompts.txt"
+    if not path.is_file():
+        return {}
+    out = {}
+    for section in path.read_text(encoding="utf-8").split("### "):
+        if not section.strip():
+            continue
+        name, _, body = section.partition("\n")
+        parts = body.split(PROMPT_MARKER)
+        if len(parts) > 1:
+            out[name.strip()] = (PROMPT_MARKER + parts[1]).strip()
+    return out
+
+
+def build_table2() -> None:
+    """Prompt template per condition, with its measured token budget."""
+    prompts = _first_prompt_of_each_condition()
+    budget_path = ARTEFACTS_DIR / "arm3_prompt_budget.csv"
+    budget = pd.read_csv(budget_path).set_index("condition") if budget_path.is_file() else None
+
+    header = ["Condition", "Template", "Prompt length (tokens)", "Decoding"]
+    rows: list[list[str]] = []
+    tsv_rows: list[list[str]] = []
+    for condition in ("zero_shot", "few_shot", "cot"):
+        prompt = prompts.get(condition, "(not found in arm3_prompts.txt)")
+        # The candidate list and question are per item; collapse both so the table shows a
+        # template rather than one arbitrary instance.
+        shown = re.sub(r"Diagnoses:\n[^\n]+", "Diagnoses:|<20 retrieved candidate labels>", prompt)
+        # In few_shot the first n_shots Question: blocks are exemplars, not the item under
+        # test; labelling them all as the test question misdescribes the template.
+        n_exemplars = HP.n_shots if condition == "few_shot" else 0
+        seen = 0
+
+        def _mark(match, n_exemplars=n_exemplars):
+            nonlocal seen
+            seen += 1
+            tag = "<exemplar question>" if seen <= n_exemplars else "<test question>"
+            return "Question:|" + tag
+
+        shown = re.sub(r"Question:\n[^\n]+", _mark, shown)
+        shown = shown.replace("\n", "<br>").replace("|", "<br>")
+        selected = " **(selected)**" if condition == HP.prompt_mode else ""
+        if budget is not None and condition in budget.index:
+            b = budget.loc[condition]
+            tokens = (f"median {int(b['median_tokens'])}, p95 {int(b['p95_tokens'])}, "
+                      f"max {int(b['max_tokens'])}; truncated at 512: {b['truncation_rate_512']:.0%}")
+        else:
+            tokens = "not measured"
+        new_tokens = HP.arm3_cot_max_new_tokens if condition == "cot" else HP.arm3_max_new_tokens
+        decoding = f"T={HP.llm_temperature:g}, max_new_tokens={new_tokens}"
+        rows.append([f"`{condition}`{selected}", shown, tokens, decoding])
+        # The TSV is for pasting into a word processor, so it carries no markdown and no
+        # embedded line breaks; the full template lives in the .md alongside it.
+        tsv_rows.append([
+            condition + (" (selected)" if condition == HP.prompt_mode else ""),
+            shown.replace("<br>", " ").replace("`", ""),
+            tokens,
+            decoding,
+        ])
+
+    caption = (
+        f"Prompt conditions for Arm 3, generated on `{HP.arm3_model_name}` (secondary: "
+        f"`{HP.arm3_secondary_model_name}`). Templates are reproduced from "
+        "`artefacts/arm3_prompts.txt` -- the prompts actually sent -- with the per-item "
+        "candidate list and question collapsed to placeholders. Token counts are measured over "
+        f"all 200 validation prompts. `few_shot` uses {HP.n_shots} exemplars drawn from the fit "
+        "split. The selected condition was chosen by the pre-registered McNemar rule, which "
+        "returned unresolved; see the report."
+    )
+    write_md_table(TABLES_DIR / "table2_prompts.md", header, rows, caption)
+    write_tsv(TABLES_DIR / "table2_prompts.tsv", header, tsv_rows)
+
+
+# --------------------------------------------------------------------------- #
+# Table 3 -- computational resources (required by the brief)
+# --------------------------------------------------------------------------- #
+
+def build_table3() -> None:
+    """Compute cost per arm.
+
+    Arm 1 is timed live here. Arms 2 and 3 are read from the artefacts their own Colab runs
+    persisted, because neither can be re-timed on this workstation -- reporting a guess for
+    either would violate the rule that no number appears unless code produced it.
+    """
+    import time
+
+    from amlh import arm1_experiments as ae
+
+    fit = pd.read_csv(ARTEFACTS_DIR / "split_fit.csv")
+    test = load_test()
+
+    start = time.perf_counter()
+    ae.frozen_ranking(fit, test, HP, depth=HP.shortlist_k)
+    arm1_seconds = time.perf_counter() - start
+
+    header = ["Arm", "Hardware", "Wall clock", "What was measured"]
+    rows = [[
+        "Arm 1 -- TF-IDF + k-NN",
+        "CPU (workstation)",
+        f"{arm1_seconds:.1f} s",
+        "index build, vectorise and rank 200 test questions; timed in this run",
+    ]]
+
+    ablation_path = ARTEFACTS_DIR / "arm2_model_ablation.csv"
+    if ablation_path.is_file():
+        ab = pd.read_csv(ablation_path).set_index("model_name")
+        if HP.bert_model_name in ab.index:
+            row = ab.loc[HP.bert_model_name]
+            rows.append([
+                "Arm 2 -- Bio_ClinicalBERT",
+                "Colab T4 GPU",
+                f"{row['wall_clock_s'] / 60:.1f} min",
+                (f"full epoch sweep behind the checkpoint choice; peak GPU memory "
+                 f"{row['peak_memory_mb'] / 1000:.1f} GB. The frozen checkpoint is epoch "
+                 f"{HP.num_epochs}, so training only to that point costs a fraction of this."),
+            ])
+
+    conditions_path = ARTEFACTS_DIR / "arm3_prompt_conditions.csv"
+    if conditions_path.is_file():
+        cond = pd.read_csv(conditions_path)
+        sel = cond[(cond["condition"] == HP.prompt_mode)
+                   & (cond["model_name"] == HP.arm3_model_name)]
+        if len(sel):
+            rows.append([
+                "Arm 3 -- shortlist + LLM",
+                "Colab T4 GPU",
+                f"{float(sel['wall_clock_sec'].iloc[0]):.0f} s",
+                (f"generation over 200 items at the selected `{HP.prompt_mode}` condition, on "
+                 "top of Arm 1 -- Arm 3 adds to the retrieval cost, it does not replace it."),
+            ])
+
+    caption = (
+        "Computational resources per arm. Arm 1 is timed in this run on CPU; Arms 2 and 3 are "
+        "read from the artefacts their Colab runs persisted, since neither can be re-timed on "
+        "the workstation. The figures are not like-for-like units of work -- Arm 2's is "
+        "training, Arm 3's is inference -- so the report compares orders of magnitude, not "
+        "durations."
+    )
+    write_md_table(TABLES_DIR / "table3_resources.md", header, rows, caption)
+    write_tsv(TABLES_DIR / "table3_resources.tsv", header,
+              [[cell.replace("`", "") for cell in row] for row in rows])
+
+
 def main() -> None:
     set_seed()
     build_table1()
+    build_table2()
+    build_table3()
     build_table5()
     fact_boilerplate()
     fact_truncation()
@@ -585,6 +785,8 @@ def main() -> None:
 
     print("Wrote:")
     for name in ("table1_preprocessing.md", "table1_preprocessing.tsv",
+                 "table2_prompts.md", "table2_prompts.tsv",
+                 "table3_resources.md", "table3_resources.tsv",
                  "table5_ablations.md", "table5_ablations.tsv", "table_facts.json"):
         print(" ", TABLES_DIR / name)
 

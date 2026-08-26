@@ -120,6 +120,24 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
     any of the 906 labels, so they are free-text hallucinations and `parse_diagnosis_name` is
     correct. Do not retune the parser post-hoc; report the rate as a finding.
 
+## Known limitation — `sublinear_tf` was never tie-broken (observed 2026-08-25)
+
+`report/tables/table5_ablations.md` records `sublinear_tf=True` at **0.530** on the shift-aware
+hold-out against the frozen `False` at **0.398** — a 13.3pp gap, more than five times that
+split's SE — while the standard hold-out separates them by 2.0pp (0.870 vs 0.850), inside its own
+~2.5pp SE.
+
+That is exactly the pattern the pre-registered tie-break was written for: the standard protocol
+does not discriminate, the shift-aware one does. But the rule's scope is stated as governing
+**index-variant and index-scheme selection only**, and `sublinear_tf` is a vectoriser parameter,
+so the rule was not violated — it simply never applied.
+
+**Do not change `sublinear_tf` now.** The test set has been read; any change at this point would
+be a test-informed selection and would invalidate the protocol the whole project rests on. This
+belongs in the report's §4.2 as a limitation and a piece of future work: had the tie-break been
+scoped to the vectoriser grid as well, it would have selected `True`, and the shift-aware split
+predicts that would have generalised better.
+
 ## Test-run scope (decided 2026-08-23, before `05_results.ipynb` was written)
 
 All three arms generate test predictions in `05_results.ipynb`, so the report can give the
@@ -213,13 +231,53 @@ accuracy. Cause: the ~10 questions per disease were generated in one pass, so a 
 is a phrasing sibling of those left in training (cosine 0.572) while a test question is not
 (0.391). Cross-validation would not fix this — siblings remain inside every fold.
 
-**Measured optimism, corrected 2026-08-24** from the frozen test run in `05_results.ipynb`:
+**Measured optimism, all three arms, from the completed frozen test run (2026-08-25).**
+Arm 1 ran on CPU in `05_results.ipynb`; Arms 2 and 3 in `05_results_colab.ipynb`. The Arm 3
+reproduction guard passed (its `arm1_pred` matches `arm1_test_predictions.csv` item for item)
+and the Arm 2 retrain reproduced the selected model exactly (`retrain val accuracy: 0.8500 |
+recorded: 0.8500 | delta: 0.0000`, printed in §3b).
 
-| Arm 1 (frozen: QLAD, class_blob, ngram (1,2), k=1) | validation | test | optimism |
-|---|---|---|---|
-| accuracy | 0.850 | **0.765** | **8.5pp** |
+| Arm | validation | test | optimism | macro-F1 (test) |
+|---|---|---|---|---|
+| Arm 1 — TF-IDF + k-NN | 0.850 | **0.765** | **8.5pp** | 0.563 |
+| Arm 2 — Bio_ClinicalBERT | 0.850 | **0.615** | **23.5pp** | 0.354 |
+| Arm 3 — shortlist + MediPhi | 0.720 | **0.720** | **0.0pp** | 0.494 |
 
-Test acc@5 = 0.925, acc@10 = 0.945, acc@20 = 0.975 (so Arm 3's test shortlist ceiling is 0.975).
+Arm 1 test acc@5 = 0.925, acc@10 = 0.945, acc@20 = 0.975 (Arm 3's test shortlist ceiling).
+
+**The validation ranking inverts on test, and this is the report's headline.** Every comparison
+the hold-out resolved, the test set reverses or dissolves:
+
+| Pair | Validation | Test |
+|---|---|---|
+| Arm 1 vs Arm 2 | 15/15, p = 1.000 — unresolved | 37/7, **p = 5.3e-06, Arm 1 wins** |
+| Arm 1 vs Arm 3 | 32/6, p = 2.4e-05, Arm 1 wins | 20/11, **p = 0.150 — unresolved** |
+| Arm 2 vs Arm 3 | 33/7, p = 4.2e-05, Arm 2 wins | 11/32, **p = 0.0019, Arm 3 wins** |
+
+The per-arm optimism explains it: the encoder has only training questions to learn from and is
+nearly three times as optimistic as the retriever, whose QLAD index also carries NHS prose that
+owes nothing to sibling phrasing.
+
+**Arm 3's 0.0pp optimism is arithmetic, not a finding.** 81% of its test items are kept-at-rank-1
+or fallback — Arm 1's own answer — so Arm 3 tracks Arm 1 minus an intervention penalty, and the
+penalty shrank (0.130 → 0.045) because the retriever it overrides got worse. The exact
+0.720 = 0.720 equality is coincidence; say so rather than making a story of it.
+
+Arm 3 test decomposition: kept rank 1 n=120 (0.958, delta 0), fell back n=42 (0.429, delta 0,
+inert as designed), moved off rank 1 n=38 (0.289 against Arm 1's 0.526). Intervention precision
+rose from 6/50 = 0.12 on validation to 11/38 = 0.29 on test, still net-negative.
+
+Three-arm agreement on test: 107 all-correct, 34 all-wrong; uniquely correct 11 / 2 / 6 for
+Arms 1 / 2 / 3; oracle ceiling 0.830. Arm 2 contributes 2 unique items.
+
+**The within-family error metric is only reportable on validation.** Conditioned on such an error
+being *possible* (gold's prefix family having more than one member in the 906-label space):
+validation has 88/200 such items and Arm 1 makes 18 within-family errors out of 25 possible
+(0.72, Arm 2: 10/21 = 0.48); test has only 18/200, and Arm 1's denominator is a **single error**.
+The unconditioned test figure reads 0% for every arm, which is a fact about the test sample's
+class composition, not about the models. `results.family_error_summary` enforces the conditioning
+and returns `None` rather than `0.0` when nothing was possible. Do not write that "the error mode
+changed between splits".
 
 **The earlier "~0.77 vs ~0.40, roughly 35pp" figure is superseded and must not be repeated.** It
 described a pre-freeze Arm 1 — index variant `Q`, the question-only index, before the QLAD /

@@ -19,6 +19,7 @@ that would have caught the 2026-08-23 QLA incident.
 from __future__ import annotations
 
 import pandas as pd
+from sklearn.metrics import f1_score
 
 from amlh import arm1_experiments as ae
 from amlh import evaluate
@@ -161,12 +162,21 @@ def score_arms(frames: dict[str, pd.DataFrame], seed: int | None = None) -> pd.D
             "accuracy": sum(p == g for p, g in zip(pred, gold)) / len(gold),
             "ci_low": ci["ci_low"],
             "ci_high": ci["ci_high"],
+            # macro-F1 needs only top-1, so every arm gets one. It used to sit inside the
+            # ranking-gated block below, which silently dropped it for Arm 3 — the arm whose
+            # per-class behaviour the error analysis most needs to describe.
+            "macro_f1": f1_score(gold, pred, average="macro", zero_division=0),
         }
         available = [c for c in top_cols if c in frame.columns]
         if available:
             ranked = [[lab for lab in r if isinstance(lab, str)] for r in frame[available].values.tolist()]
             scored = evaluate.score_ranked(ranked, gold)
-            row.update({"acc_at_5": scored["acc_at_5"], "macro_f1": scored["macro_f1"], "mrr": scored["mrr"]})
+            row.update({"acc_at_5": scored["acc_at_5"], "mrr": scored["mrr"]})
+        else:
+            # Explicit None rather than an absent key. A blank cell in the results table
+            # has to read as "this arm cannot produce a ranking" — Arm 3 emits one label,
+            # not an ordering — and not as a value that went missing.
+            row.update({"acc_at_5": None, "mrr": None})
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -205,12 +215,66 @@ def validation_test_gap(
     return merged
 
 
-def confusion_pairs(frame: pd.DataFrame, top_n: int = 15) -> pd.DataFrame:
+def prefix_family_sizes(label_space) -> dict[str, int]:
+    """Members per prefix family across the whole label space.
+
+    CLAUDE.md records 355 of the 906 labels sharing a prefix family (`baby_`, `pregnancy_`,
+    …). Sizes must be counted over the *full* label space, not over the labels present in
+    one split: a model may predict any of the 906 classes, so whether `gold` has a
+    confusable sibling is a property of the label space, never of the evaluation sample.
+    """
+    sizes: dict[str, int] = {}
+    for label in label_space:
+        prefix = label.split("_")[0]
+        sizes[prefix] = sizes.get(prefix, 0) + 1
+    return sizes
+
+
+def family_error_summary(frame: pd.DataFrame, label_space) -> dict:
+    """Within-family error rate, conditioned on such an error being *possible*.
+
+    An unconditioned "share of errors that are within-family" is uninterpretable, and on
+    this dataset actively misleading. A gold label whose prefix family has exactly one
+    member cannot be confused with a sibling at all, so it contributes a guaranteed zero
+    to the numerator while still inflating the denominator.
+
+    That is not hypothetical here. On the validation split 88/200 items have a gold label
+    in a multi-member family and the measured rate is high; on the test split only 18/200
+    do, so the unconditioned figure reads 0% for every arm while the conditioned
+    denominator is a single error. Reporting the former as "the error mode changed
+    between splits" would be a claim about the class composition of the two samples
+    disguised as a claim about the models.
+
+    `within_family_share` is therefore `None`, never `0.0`, when nothing was possible —
+    the caller must be forced to notice the absent denominator rather than plot a zero.
+    """
+    sizes = prefix_family_sizes(label_space)
+    errors = frame[frame["pred"] != frame["gold"]]
+    possible = [sizes.get(g.split("_")[0], 0) > 1 for g in errors["gold"]]
+    within = [
+        g.split("_")[0] == p.split("_")[0]
+        for g, p, ok in zip(errors["gold"], errors["pred"], possible)
+        if ok
+    ]
+    n_possible = sum(possible)
+    return {
+        "n_errors": len(errors),
+        "n_family_error_possible": n_possible,
+        "n_within_family": sum(within),
+        "within_family_share": (sum(within) / n_possible) if n_possible else None,
+    }
+
+
+def confusion_pairs(frame: pd.DataFrame, top_n: int = 15, label_space=None) -> pd.DataFrame:
     """Most frequent (gold, predicted) error pairs, with a same-family flag.
 
-    The family flag matters because CLAUDE.md records 355/906 labels sharing a prefix
-    family; an error inside `baby_*` is a different kind of failure from one across
-    unrelated conditions, and collapsing them would hide the actual error mode.
+    The family flag matters because an error inside `baby_*` is a different kind of failure
+    from one across unrelated conditions, and collapsing them would hide the actual error
+    mode. Pass `label_space` to also get `family_error_possible`, which says whether that
+    row's gold label had any sibling to be confused with — without it, a `same_family`
+    column of all-False cannot be told apart from a set of golds that had no siblings.
+    Aggregate over `family_error_summary` rather than averaging `same_family` here; this
+    frame is truncated to `top_n` and is not a basis for a rate.
     """
     errors = frame[frame["pred"] != frame["gold"]]
     counts = (
@@ -219,6 +283,9 @@ def confusion_pairs(frame: pd.DataFrame, top_n: int = 15) -> pd.DataFrame:
     counts["same_family"] = [
         g.split("_")[0] == p.split("_")[0] for g, p in zip(counts["gold"], counts["pred"])
     ]
+    if label_space is not None:
+        sizes = prefix_family_sizes(label_space)
+        counts["family_error_possible"] = [sizes.get(g.split("_")[0], 0) > 1 for g in counts["gold"]]
     return counts.head(top_n).reset_index(drop=True)
 
 
