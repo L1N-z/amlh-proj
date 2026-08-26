@@ -120,7 +120,7 @@ algorithm design and implementation (40), results (25), discussion (10), introdu
     any of the 906 labels, so they are free-text hallucinations and `parse_diagnosis_name` is
     correct. Do not retune the parser post-hoc; report the rate as a finding.
 
-## Known limitation — `sublinear_tf` was never tie-broken (observed 2026-08-25)
+## Known limitation — `sublinear_tf` was never tie-broken (observed 2026-08-25, decided 2026-08-26)
 
 `report/tables/table5_ablations.md` records `sublinear_tf=True` at **0.530** on the shift-aware
 hold-out against the frozen `False` at **0.398** — a 13.3pp gap, more than five times that
@@ -132,11 +132,39 @@ does not discriminate, the shift-aware one does. But the rule's scope is stated 
 **index-variant and index-scheme selection only**, and `sublinear_tf` is a vectoriser parameter,
 so the rule was not violated — it simply never applied.
 
-**Do not change `sublinear_tf` now.** The test set has been read; any change at this point would
-be a test-informed selection and would invalidate the protocol the whole project rests on. This
-belongs in the report's §4.2 as a limitation and a piece of future work: had the tie-break been
-scoped to the vectoriser grid as well, it would have selected `True`, and the shift-aware split
-predicts that would have generalised better.
+One nuance to keep straight when writing about this. The tie-break *rule* was pre-registered
+(2026-08-09), but the *scope sentence* is marked "scope clarified 2026-08-15" — the same date the
+index-variant decision was recorded, i.e. it was written down as the rule was being applied. There
+is a defensible reason the vectoriser sat outside it (the §4b re-tune is recorded as "a consequence
+of the variant switch, not an independent choice", so it was treated as mechanical rather than as a
+selection needing a rule), but `sublinear_tf` came from the step-2 grid and was not part of that
+re-tune. It therefore falls in a genuine gap, not a principled exclusion. Do not claim in the
+report that the vectoriser was deliberately excluded.
+
+### Decision (2026-08-26): leave it, and report it as a limitation
+
+**`sublinear_tf` stays `False`. Nothing is re-run, and no further test-set quantity is read for
+it.** This was chosen deliberately over two alternatives, both of which were considered and
+rejected:
+
+- **Switch to `True` and re-run the test.** Rejected as illegitimate. The evidence for `True` is
+  validation-side, but the impulse to look again came *after* the test result was known, and
+  whether the same look would have happened had test come back at 0.90 is unanswerable. That is a
+  garden-of-forking-paths selection, and it breaks hard rule #2 outright.
+- **Measure `True` on test as a declared post-hoc diagnostic**, extending the precedent of
+  Declared exception #2 (which already computes test accuracy for the index-variant grid as a
+  *protocol diagnostic, not model selection*). Defensible in principle, and it would have tested
+  the report's central methodological claim directly. Rejected on asymmetry: once measured it must
+  be reported whichever way it falls, a confirming result complicates the story ("why did you not
+  ship the better system?") for modest gain in a 10-mark Discussion section, and a refuting result
+  would damage the report's strongest methodological point. The report is also already over its
+  word cap.
+
+The reasoning to carry into the report: **following a pre-registered rule even when a post-hoc
+look suggests a higher score was available is what pre-registration is for.** Frame it as
+discipline exercised, not as an oversight discovered — the choice not to act is the point. Say
+plainly that the shift-aware split predicts `True` would have generalised better, and that this
+is the first thing to change in any repeat of the work.
 
 ## Test-run scope (decided 2026-08-23, before `05_results.ipynb` was written)
 

@@ -20,6 +20,7 @@ Write to 2,400 and trim.
 | Sibling homogeneity | train→sibling 0.572 vs test→own-class 0.391 (test→other-class 0.510) | §3.1, §4.2 — **the centrepiece** |
 | Wrong class closer | 59.5% of test questions | §3.1 |
 | Validation→test gap | 0.850 val vs 0.765 test, 8.5pp optimism, frozen Arm 1 (`validation_test_gap.csv`) — supersedes the earlier ~0.77 vs ~0.40 / ~35pp figure, which described the pre-freeze variant-Q, ngram(1,1) system, not the frozen QLAD/class_blob/(1,2) one | §2.5, §4.2 |
+| `sublinear_tf` not tie-broken | shift-aware 0.530 (`True`) vs 0.398 (frozen `False`), >5 SE; standard hold-out 0.870 vs 0.850, inside its own SE. Tie-break scoped to index selection, so it never applied. **Decision 2026-08-26: left unchanged deliberately** — acting after the test read would be a test-informed selection | §4.2 — discipline, not oversight |
 
 ---
 
