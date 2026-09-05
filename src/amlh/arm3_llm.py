@@ -34,6 +34,7 @@ layer. Tests can inject a fake generator and never download a model.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from dataclasses import dataclass
@@ -375,6 +376,28 @@ def load_generator(model_name: str | None = None, device=None, hp=HYPERPARAMETER
         return [{"generated_text": generated_text.strip()}]
 
     return tokenizer, model, pipe
+
+
+@contextlib.contextmanager
+def generator_session(model_name: str | None = None, device=None, hp=HYPERPARAMETERS):
+    """`load_generator`, scoped to a `with` block that always frees the GPU.
+
+    `run_condition` calls `pipe(...)` once per item with no batching; if any call raises
+    (CUDA OOM or otherwise), a bare `del model; torch.cuda.empty_cache()` placed after the
+    call never runs, because it sits after the very call it was meant to guard. That leaves
+    a multi-GB generator resident on the GPU, so a naive retry of the same cell loads a
+    second copy on top of it and can exceed the GPU's memory even though either copy alone
+    would have fit. The `finally` below runs on both the success and the exception path.
+    """
+    import torch
+
+    tokenizer, model, pipe = load_generator(model_name, device=device, hp=hp)
+    try:
+        yield tokenizer, model, pipe
+    finally:
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 def run_condition(
