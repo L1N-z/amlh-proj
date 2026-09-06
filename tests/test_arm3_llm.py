@@ -277,3 +277,60 @@ def test_build_prompt_table_renders_chat_messages():
     text = a3.build_prompt_table({"zero_shot": prompts})
     assert a3.SYSTEM_PROMPT in text
     assert "Respond with only the diagnosis name." in text
+
+
+def _stub_load_generator(monkeypatch):
+    """Swap in a fake `load_generator` so `generator_session` needs no real model."""
+    calls = []
+
+    def fake_load_generator(model_name=None, device=None, hp=None):
+        calls.append(model_name)
+        return "tokenizer", object(), fake_pipe(["Final answer: bronchitis"])
+
+    monkeypatch.setattr(a3, "load_generator", fake_load_generator)
+    return calls
+
+
+def test_generator_session_yields_the_loaded_generator_and_frees_the_gpu_on_success(monkeypatch):
+    torch = pytest.importorskip("torch")
+    _stub_load_generator(monkeypatch)
+    emptied = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: emptied.append(True))
+
+    with a3.generator_session("some/model") as (tokenizer, model, pipe):
+        assert tokenizer == "tokenizer"
+        assert callable(pipe)
+
+    assert emptied == [True]
+
+
+def test_generator_session_frees_the_gpu_even_when_the_body_raises(monkeypatch):
+    """A crash mid-generation (e.g. CUDA OOM) must not leave the model resident on the GPU --
+
+    otherwise a retry of the same cell loads a second copy on top of the leaked first one.
+    """
+    torch = pytest.importorskip("torch")
+    _stub_load_generator(monkeypatch)
+    emptied = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: emptied.append(True))
+
+    with pytest.raises(RuntimeError, match="CUDA out of memory"):
+        with a3.generator_session("some/model") as (tokenizer, model, pipe):
+            raise RuntimeError("CUDA out of memory")
+
+    assert emptied == [True]
+
+
+def test_generator_session_skips_empty_cache_without_cuda(monkeypatch):
+    torch = pytest.importorskip("torch")
+    _stub_load_generator(monkeypatch)
+    emptied = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: emptied.append(True))
+
+    with a3.generator_session("some/model") as (tokenizer, model, pipe):
+        pass
+
+    assert emptied == []

@@ -1,8 +1,7 @@
 """Load, audit, and split the patient question classification dataset.
 
 No modelling code lives here. ``load_test`` strips the ``answer`` column at
-load time — the primary enforcement point for the rule that ``answer`` is
-never an inference-time input (see CLAUDE.md hard rule #1).
+load time, so ``answer`` is never available as an inference-time input.
 """
 
 import json
@@ -38,7 +37,7 @@ def load_train() -> pd.DataFrame:
 
 
 def load_test() -> pd.DataFrame:
-    """Test DataFrame with `answer` dropped — enforces hard rule #1."""
+    """Test DataFrame with the `answer` column dropped."""
     df = pd.read_csv(TEST_CSV)
     missing = {"question", "disease", "reference_url"} - set(df.columns)
     if missing:

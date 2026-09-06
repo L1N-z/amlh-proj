@@ -1,19 +1,16 @@
-"""Frozen test-run logic for `05_results`.
+"""Frozen test-run logic: scoring, cross-arm comparison and error analysis.
 
-Everything here runs *after* every hyperparameter in `config.py` is frozen. Nothing in
-this module selects anything, and no function returns a quantity that could be fed back
-into a choice — that is the whole point of confining the test set to this stage.
+Everything here runs after every hyperparameter in `config.py` is frozen. Nothing
+in this module selects anything, and no function returns a quantity that could be
+fed back into a choice.
 
 The test set is reached only through `data.load_test`, which drops `answer` at the
-loader, so hard rule #1 is enforced before any code in this module sees a row.
-`assert_no_answer_column` re-checks it anyway at each entry point, because the cost of
-the check is nothing and the cost of being wrong is the coursework.
+loader; `assert_no_answer_column` re-checks it at each entry point.
 
-Two of the three arms need a GPU, so the test run is split across `05_results.ipynb`
-(CPU: Arm 1 + all aggregation) and `05_results_colab.ipynb` (GPU: Arms 2 and 3). The
-Colab side rebuilds the Arm 1 test shortlist itself and `assert_reproduces_arm1_test`
-proves it matches the CPU side item for item before any prompt is sent — the same guard
-that would have caught the 2026-08-23 QLA incident.
+Two of the three arms need a GPU, so the test run is split between a CPU stage
+(Arm 1 and all aggregation) and a GPU stage (Arms 2 and 3). The GPU side rebuilds
+the Arm 1 test shortlist itself, and `assert_reproduces_arm1_test` checks it
+matches the CPU side item for item before any prompt is sent.
 """
 
 from __future__ import annotations
@@ -28,10 +25,9 @@ from amlh.config import ARTEFACTS_DIR, HYPERPARAMETERS
 SHORTLIST_DEPTH = 20
 """Ranking depth for the persisted test predictions.
 
-Matches `02_arm1.ipynb`'s `SHORTLIST_DEPTH`, so the test frames carry the same
-`top_1..top_20` columns as `arm1_val_predictions.csv` and Arm 3 has a shortlist to
-select from. `knn_rank`'s `depth` only appends below the head, so rank 1 is identical to
-the `depth=None` path the Arm 1 grid reported.
+Matches the validation side, so the test frames carry the same `top_1..top_20`
+columns and Arm 3 has a shortlist to select from. `knn_rank`'s `depth` only
+appends below the head, so rank 1 is identical to the `depth=None` path.
 """
 
 ARM_LABELS = {
@@ -69,8 +65,8 @@ def build_test_predictions(fit_df: pd.DataFrame, test_df: pd.DataFrame, hp=HYPER
     path are the same code at the same hyperparameters, rather than two implementations
     that happen to agree today.
 
-    `fit_df` is `split_fit`, not the full training set: CLAUDE.md fixes the tested model
-    as the validated model so the validation→test optimism analysis describes one object.
+    `fit_df` is `split_fit`, not the full training set, so the tested model is the
+    validated model and the validation→test optimism analysis describes one object.
     """
     assert_no_answer_column(test_df)
     return ae.build_val_predictions(fit_df, test_df, hp, depth=SHORTLIST_DEPTH)
@@ -79,16 +75,13 @@ def build_test_predictions(fit_df: pd.DataFrame, test_df: pd.DataFrame, hp=HYPER
 def assert_reproduces_arm1_test(
     shortlists: list[list[str]], reference_path=None, tolerance: int = 0
 ) -> None:
-    """Prove a Colab-rebuilt Arm 1 test shortlist matches the CPU-side one item for item.
+    """Check a rebuilt Arm 1 test shortlist against the persisted CPU-side one.
 
-    The Arm 3 incident of 2026-08-23 was invisible precisely because a degraded index
-    still produced plausible shortlists. Rank 1 is a sharp fingerprint of the index that
-    built it, so comparing it against the persisted CPU run catches a missing `D`
-    component before any GPU time is spent.
-
-    TF-IDF and NearestNeighbors are deterministic on identical input, so the default
-    `tolerance=0` is correct; the parameter exists only to make a deliberate relaxation
-    explicit rather than silent.
+    A degraded index still produces plausible-looking shortlists, so rank 1 is
+    compared item for item before any GPU time is spent. TF-IDF and
+    NearestNeighbors are deterministic on identical input, so the default
+    `tolerance=0` is correct; the parameter only makes a deliberate relaxation
+    explicit.
     """
     reference_path = reference_path or ARTEFACTS_DIR / TEST_PREDICTION_FILES["arm1_tfidf_knn"]
     reference = pd.read_csv(reference_path)
@@ -109,9 +102,9 @@ def assert_reproduces_arm1_test(
 def load_available_arms(artefacts_dir=ARTEFACTS_DIR) -> dict[str, pd.DataFrame]:
     """Load whichever arms' test predictions have been produced so far.
 
-    Returns only what exists. `05_results.ipynb` must run standalone after a kernel
-    restart, and on a machine where the Colab half has not been run yet that means
-    reporting Arm 1 alone and saying so — not raising.
+    Returns only what exists, so the test-run notebook still runs standalone after
+    a kernel restart on a machine where the GPU half has not been run yet: it
+    reports Arm 1 alone and says so rather than raising.
     """
     frames = {}
     for arm, filename in TEST_PREDICTION_FILES.items():
@@ -184,9 +177,9 @@ def score_arms(frames: dict[str, pd.DataFrame], seed: int | None = None) -> pd.D
 def pairwise_mcnemar(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Every pairwise McNemar over the matched test items.
 
-    Reported for all pairs because no final system is nominated — CLAUDE.md's test-scope
-    decision is that the arms are compared side by side, so every comparison is a result
-    rather than a step towards one.
+    Reported for all pairs because no final system is nominated: the arms are
+    compared side by side, so every comparison is a result rather than a step
+    towards one.
     """
     from itertools import combinations
 
@@ -203,9 +196,9 @@ def validation_test_gap(
 ) -> pd.DataFrame:
     """Pair each arm's validation accuracy against its test accuracy.
 
-    Quantifies the optimism CLAUDE.md records at roughly 35pp for Arm 1, now measured
-    per arm rather than assumed to be uniform across them. This is a diagnostic of the
-    hold-out protocol, computed after the test run; it selects nothing.
+    Measures the optimism per arm rather than assuming it is uniform across them.
+    A diagnostic of the hold-out protocol, computed after the test run; it selects
+    nothing.
     """
     val_comparison_path = val_comparison_path or ARTEFACTS_DIR / "cross_arm_val_comparison.csv"
     val = pd.read_csv(val_comparison_path)[["arm", "accuracy"]].rename(columns={"accuracy": "val_accuracy"})
@@ -218,10 +211,10 @@ def validation_test_gap(
 def prefix_family_sizes(label_space) -> dict[str, int]:
     """Members per prefix family across the whole label space.
 
-    CLAUDE.md records 355 of the 906 labels sharing a prefix family (`baby_`, `pregnancy_`,
-    …). Sizes must be counted over the *full* label space, not over the labels present in
+    Sizes are counted over the *full* label space, not over the labels present in
     one split: a model may predict any of the 906 classes, so whether `gold` has a
-    confusable sibling is a property of the label space, never of the evaluation sample.
+    confusable sibling is a property of the label space, never of the evaluation
+    sample.
     """
     sizes: dict[str, int] = {}
     for label in label_space:

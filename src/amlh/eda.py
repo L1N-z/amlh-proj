@@ -1,9 +1,9 @@
 """Diagnostics for the validation-test gap and label-space structure.
 
-``sibling_homogeneity`` and ``novelty_calibrated_eval`` read ``test.disease`` under
-CLAUDE.md's declared 01_eda exception: they characterise the validation-test
-relationship (sibling phrasing homogeneity, the novelty-calibration target) and
-select no model, hyperparameter, preprocessing or index-variant choice.
+``sibling_homogeneity`` and ``novelty_calibrated_eval`` read ``test.disease`` to
+characterise the validation-test relationship (sibling phrasing homogeneity, the
+novelty-calibration target). They select no model, hyperparameter, preprocessing
+or index-variant choice.
 """
 
 from collections import defaultdict
@@ -56,7 +56,7 @@ class SiblingHomogeneity:
 def sibling_homogeneity(train: pd.DataFrame, test: pd.DataFrame) -> SiblingHomogeneity:
     """Measure phrasing homogeneity within a class vs. between train and test.
 
-    Declared diagnostic use of `test.disease` (CLAUDE.md hard rule #2 exception).
+    Diagnostic use of `test.disease` only; selects no hyperparameter.
     """
     vec = TfidfVectorizer(sublinear_tf=True).fit(train.question)
     Xtr = vec.transform(train.question)

@@ -1,35 +1,26 @@
-"""Arm 3 LLM shortlist selection.
+"""Arm 3: LLM selection over an Arm 1 shortlist.
 
-Frozen Arm 1 retrieval produces a shortlist of candidate labels; Arm 3 then
-formats that shortlist into one of three prompt conditions, sends the prompt to
-an LLM, matches the model's answer back to a shortlist label, and falls back to
-the Arm 1 top-1 label when no candidate can be matched.
+Frozen Arm 1 retrieval produces a shortlist of candidate labels; Arm 3 formats
+it into one of three prompt conditions, sends the prompt to the generator,
+matches the reply back to a shortlist label by name, and falls back to the Arm 1
+top-1 label when no candidate matches.
 
-The design deliberately mirrors the NLP4 practical
-(``reference/NLP4_patientQ&A-solution.ipynb``), whose Task 4 is this exact
-problem — prompt an LLM to pick the most relevant diagnosis from a candidate
-list. Specifically:
+The design follows Task 4 of the NLP4 practical, which prompts an LLM to pick the
+most relevant diagnosis from a candidate list: the generator is called through a
+``pipe(prompt, max_new_tokens=...)`` closure, prompts are chat messages carrying a
+system persona and a "Respond with only the diagnosis name." instruction, and the
+reply is matched by name rather than by a candidate number.
 
-* the generator is loaded and called through a ``pipe(prompt, max_new_tokens=...)``
-  closure with the practical's signature (its ``cell-7``);
-* prompts are chat messages, ``[{"role": ..., "content": ...}]``, with the
-  practical's system persona and its "Respond with only the diagnosis name."
-  instruction (its ``cell-27``);
-* the reply is matched back by *name*, not by a candidate number.
+Two deviations from the practical, both stated in the report:
 
-Two deliberate deviations, both to be stated in the report:
-
-1. The practical falls back to ``random.choice(unique_diagnoses)`` when the
-   generated name is not in the candidate list. Arm 3 falls back to the Arm 1
-   top-1 label instead — a random label would inject noise into a measured
-   accuracy for no benefit, and the top-1 is the prediction the system would
-   have made without the LLM, which makes the fallback the honest null action.
+1. The practical falls back to a random diagnosis when the reply matches nothing.
+   Arm 3 returns the Arm 1 top-1 instead — the prediction the system would have
+   made without the LLM — so the fallback adds no noise of its own.
 2. ``flatten_messages`` joins roles with a blank line where the practical's API
-   branch uses ``"".join``; the practical's contents happen to abut cleanly and
-   ours do not.
+   branch joins them directly.
 
-All heavy lifting stays here so the notebook can remain a thin orchestration
-layer. Tests can inject a fake generator and never download a model.
+All heavy lifting stays here so the notebook remains a thin orchestration layer;
+tests can inject a fake generator and never download a model.
 """
 
 from __future__ import annotations
@@ -133,11 +124,9 @@ def assert_reproduces_arm1(
 ) -> dict:
     """Check the shortlist's top-1 against Arm 1's persisted per-item predictions.
 
-    The first Arm 3 Colab run built its shortlists from variant QLA, not the
-    frozen QLAD, because the NHS document corpus was never uploaded to the
-    runtime. Nothing in the pipeline noticed. This is the assertion that would
-    have: rank 1 of the shortlist must be, item for item, the label in
-    `artefacts/arm1_val_predictions.csv`.
+    Rank 1 identifies the index that produced it, so a shortlist built from
+    anything other than the frozen configuration is caught here, before any
+    prompt is sent.
     """
     top1 = [ranking[0] for ranking in shortlist_rankings]
     expected = arm1_predictions["top_1"].tolist()
@@ -523,9 +512,9 @@ def condition_vs_arm1_mcnemar(condition_frames: dict[str, pd.DataFrame]) -> pd.D
 def select_prompt_mode(condition_metrics: pd.DataFrame, mcnemar_df: pd.DataFrame) -> tuple[str, bool]:
     """Select the prompt mode, returning (mode, tie_break_fired).
 
-    If no condition is significantly better than both others, the unresolved
-    branch keeps `zero_shot` on the declared prior — the pre-registered rule in
-    CLAUDE.md. This can and does retain a lower-scoring condition.
+    If no condition is significantly better than both others, the comparison is
+    reported as unresolved and `zero_shot` is kept as the simplest prompt. This
+    can and does retain a lower-scoring condition.
     """
     wins: dict[str, set[str]] = {mode: set() for mode in condition_metrics["condition"]}
     for row in mcnemar_df.itertuples(index=False):
@@ -561,10 +550,10 @@ def model_mcnemar(primary_frame: pd.DataFrame, secondary_frame: pd.DataFrame) ->
 def select_model(model_mcnemar_df: pd.DataFrame, hp=HYPERPARAMETERS) -> tuple[str, bool]:
     """Select the Arm 3 generator, returning (model_name, tie_break_fired).
 
-    Pre-registered in CLAUDE.md, mirroring the Arm 2 encoder rule: if McNemar
-    does not resolve the pair at p < 0.05 the comparison is reported as
-    unresolved and the in-domain clinical model is kept on the declared prior.
-    This can and does retain the lower-scoring model.
+    Mirrors the Arm 2 encoder rule: if McNemar does not resolve the pair at
+    p < 0.05 the comparison is reported as unresolved and the in-domain clinical
+    model is kept on the declared prior. This can and does retain the
+    lower-scoring model.
     """
     row = model_mcnemar_df.iloc[0]
     primary = selected_model_name(hp)

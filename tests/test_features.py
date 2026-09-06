@@ -14,6 +14,7 @@ from amlh.features import (
     doc_coverage,
     lemmatise,
     load_class_doc,
+    load_class_doc_raw,
     require_doc_coverage,
     term_class_coverage,
 )
@@ -136,6 +137,19 @@ def test_load_class_doc_strips_boilerplate():
 
 def test_load_class_doc_missing_returns_empty():
     assert load_class_doc("this_disease_does_not_exist") == ""
+
+
+@pytest.mark.parametrize("disease", ["Bronchitis", "Multiple_sclerosis", "abscess"])
+def test_load_class_doc_raw_resolves_case_insensitively(disease):
+    # naive f"{disease.lower()}.txt" fails on a case-sensitive filesystem for the
+    # six convention-breaking labels; the resolver must not.
+    raw = load_class_doc_raw(disease)
+    assert raw != ""
+    assert len(raw) >= len(load_class_doc(disease))
+
+
+def test_load_class_doc_raw_missing_returns_empty():
+    assert load_class_doc_raw("this_disease_does_not_exist") == ""
 
 
 def test_doc_coverage_full_train_universe(train):

@@ -1,9 +1,8 @@
 """Fine-tuning orchestration for Arm 2 (BERT classifier).
 
-`question` -> WordPiece -> encoder -> 906-way linear head -> argmax. Follows the
-manual epoch-loop pattern from `reference/NLP3-BERT_for_document_classification-solution.ipynb`
-(`transformers` + `torch` only, no `Trainer`/`accelerate`/`datasets`). Orchestration
-functions here return DataFrames/tuples and never print or plot — notebooks do that.
+`question` -> WordPiece -> encoder -> 906-way linear head -> argmax, trained with a
+manual epoch loop (`transformers` + `torch` only, no `Trainer`/`accelerate`/`datasets`).
+Orchestration functions here return DataFrames/tuples and never print or plot.
 """
 
 import time

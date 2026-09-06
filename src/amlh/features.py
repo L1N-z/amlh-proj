@@ -3,7 +3,7 @@
 No modelling code lives here — this module builds the texts that
 ``arm1_tfidf.knn_rank`` vectorises. ``build_index`` accepts only a fit/train
 frame; a variant that needs ``answer`` raises ``KeyError`` on a test-shaped
-frame rather than silently degrading (see CLAUDE.md hard rule #1).
+frame rather than silently degrading.
 """
 
 import re
@@ -51,6 +51,19 @@ def load_class_doc(disease: str) -> str:
     if path is None:
         return ""
     return _strip_boilerplate(path.read_text(encoding="utf-8-sig"))
+
+
+def load_class_doc_raw(disease: str) -> str:
+    """Uncleaned NHS class document text for `disease`, or "" if none exists.
+
+    Resolves the filename case-insensitively, like `load_class_doc`. The six
+    convention-breaking labels (`Bronchitis`, `Pneumonia`, ...) keep their
+    capitalised filenames on a case-sensitive filesystem such as Colab's.
+    """
+    path = _filename_index().get(disease.lower())
+    if path is None:
+        return ""
+    return path.read_text(encoding="utf-8-sig")
 
 
 def term_class_coverage(diseases) -> dict[str, int]:
@@ -127,8 +140,7 @@ def build_index(fit_df: pd.DataFrame, variant: str) -> tuple[list[str], list[str
     components in that canonical order regardless of `variant`'s letter order.
 
     `fit_df` must be a fit/train frame. A variant containing "A" on a frame
-    without an `answer` column raises KeyError — this is how a test-frame
-    leak surfaces, not incidentally.
+    without an `answer` column raises KeyError.
     """
     bad = set(variant) - set(_COMPONENTS)
     if bad:

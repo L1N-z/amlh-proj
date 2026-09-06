@@ -408,9 +408,10 @@ print(json.dumps(audit, indent=2))
 ## §1.2 NHS document coverage and boilerplate
 
 The `D` component of the Arm 1 index is the NHS reference document for each class. Six labels
-break the naming convention (`Bronchitis`, `Pneumonia`, …), so filenames are resolved by
-lowercasing. `features._strip_boilerplate` removes navigation text, image credits and review
-dates — roughly 22% of each raw document — before anything is indexed.
+break the naming convention (`Bronchitis`, `Pneumonia`, …), so `features` resolves filenames
+case-insensitively rather than assuming a lowercase stem. `features._strip_boilerplate` removes
+navigation text, image credits and review dates — roughly 22% of each raw document — before
+anything is indexed.
 """
     )
 
@@ -424,10 +425,9 @@ with open(ARTEFACTS_DIR / "doc_coverage.json", "w") as f:
     json.dump(coverage, f, indent=2)
 
 # What stripping actually removes, measured over the whole corpus rather than one document.
-doc_dir = PROJECT_ROOT / "data" / "db_nhs_qa_classification"
 raw_chars = clean_chars = 0
 for disease in train.disease.unique():
-    raw_chars += len((doc_dir / f"{disease.lower()}.txt").read_text(encoding="utf-8", errors="ignore"))
+    raw_chars += len(features.load_class_doc_raw(disease))
     clean_chars += len(features.load_class_doc(disease))
 
 print(f"\\nboilerplate stripping over all {train.disease.nunique()} documents: "
