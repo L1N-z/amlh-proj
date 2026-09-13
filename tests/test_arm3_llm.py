@@ -70,6 +70,26 @@ def test_build_prompt_cot_asks_for_reasoning_without_a_copyable_placeholder():
     assert "Final answer: N" not in user
 
 
+@pytest.mark.parametrize("mode", ["zero_shot", "cot"])
+def test_build_prompt_ignores_exemplars_outside_few_shot(mode):
+    """Only `few_shot` renders worked examples.
+
+    The two frozen-run call sites pass ``examples=examples`` unconditionally, so
+    the exemplar block must be gated inside `build_prompt` on the mode, not on
+    whether exemplars happen to be present. `zero_shot` and `cot` prompts must be
+    byte-identical whether or not exemplars are handed in.
+    """
+    exemplars = [
+        a3.PromptExample(question="I cough", label="chronic_cough"),
+        a3.PromptExample(question="my skin itches", label="eczema"),
+    ]
+    with_ex = a3.build_prompt("why do I cough", ["chronic_cough", "flu_like_illness"], mode, examples=exemplars)
+    without_ex = a3.build_prompt("why do I cough", ["chronic_cough", "flu_like_illness"], mode, examples=None)
+
+    assert with_ex == without_ex
+    assert "Worked examples:" not in with_ex[1]["content"]
+
+
 def test_build_prompt_few_shot_includes_compact_examples():
     user = a3.build_prompt(
         "why do I cough",

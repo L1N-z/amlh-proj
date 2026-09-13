@@ -142,7 +142,7 @@ def assert_reproduces_arm1(
             f"(first at index {mismatches[0]}: got {top1[mismatches[0]]!r}, "
             f"expected {expected[mismatches[0]]!r}). The frozen retrieval configuration is not "
             "the one that produced arm1_val_predictions.csv — check that data/db_nhs_qa_classification "
-            "is present and that config.py has not drifted."
+            "is present and that config.py holds the frozen values."
         )
     return {"n": len(top1), "top1_matches_arm1": True}
 
@@ -183,7 +183,7 @@ def build_prompt(
         "",
     ]
 
-    if examples:
+    if mode == "few_shot" and examples:
         parts.append("Worked examples:")
         for example in examples:
             parts.append(f"Question:\n{example.question}")
